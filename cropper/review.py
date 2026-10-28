@@ -6,9 +6,10 @@ import atexit
 import shutil
 import tempfile
 import threading
+import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -20,6 +21,7 @@ from .pipeline import analyze_pdf
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 OUTPUT_ROOT = Path("output")
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
 class BoxPayload(BaseModel):
@@ -36,11 +38,16 @@ class SavePayload(BaseModel):
 
 
 class ReviewPaper:
-    def __init__(self, paper_id: int, path: Path, preview_dir: Path) -> None:
+    def __init__(
+        self, paper_id: int, path: Path, preview_dir: Path, display_name: str | None = None
+    ) -> None:
         self.id = paper_id
         self.path = path
         self.preview_dir = preview_dir
+        self.display_name = display_name or path.name
         self.analysis: PaperAnalysis | None = None
+        self.saved_files: list[str] = []
+        self.saved_manifest = False
         self._lock = threading.Lock()
         doc = open_pdf(path)
         try:
@@ -50,7 +57,7 @@ class ReviewPaper:
 
     @property
     def name(self) -> str:
-        return self.path.name
+        return self.display_name
 
     def load(self) -> PaperAnalysis:
         if self.analysis is not None:
@@ -73,6 +80,11 @@ class ReviewSession:
             ReviewPaper(index, path, self.temp_dir / str(index)) for index, path in enumerate(pdfs)
         ]
 
+    def add_pdf(self, path: Path, display_name: str | None = None) -> ReviewPaper:
+        paper = ReviewPaper(len(self.papers), path, self.temp_dir / str(len(self.papers)), display_name)
+        self.papers.append(paper)
+        return paper
+
     def get(self, paper_id: int) -> ReviewPaper:
         if not 0 <= paper_id < len(self.papers):
             raise HTTPException(status_code=404, detail="Unknown paper.")
@@ -90,6 +102,69 @@ def create_app(session: ReviewSession) -> FastAPI:
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
+
+    @app.post("/api/upload")
+    async def upload_pdf(request: Request, filename: str) -> dict:
+        safe_name = Path(filename.replace("\\", "/")).name
+        safe_name = "".join(char for char in safe_name if char.isprintable() and char not in '<>:"|?*')
+        if not safe_name or Path(safe_name).suffix.lower() != ".pdf":
+            raise HTTPException(status_code=400, detail="Choose a PDF file to upload.")
+
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="PDF is larger than the 100 MB upload limit.")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid upload size.") from None
+
+        upload_dir = session.temp_dir / "uploads" / uuid.uuid4().hex
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = upload_dir / safe_name
+        size = 0
+        paper = None
+        try:
+            with pdf_path.open("wb") as output:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > MAX_UPLOAD_BYTES:
+                        raise HTTPException(status_code=413, detail="PDF is larger than the 100 MB upload limit.")
+                    output.write(chunk)
+
+            try:
+                paper = session.add_pdf(pdf_path, safe_name)
+                analysis = paper.load()
+                if analysis.boxes:
+                    result = save_questions(pdf_path, analysis.boxes, output_root=OUTPUT_ROOT)
+                    paper.saved_files = [path.name for path in result.files]
+                    paper.saved_manifest = True
+            except Exception as exc:
+                if paper is not None and paper in session.papers:
+                    session.papers.remove(paper)
+                raise HTTPException(status_code=400, detail=f"Could not process PDF: {exc}") from exc
+
+            return {
+                "id": paper.id,
+                "name": paper.name,
+                "page_count": paper.page_count,
+                "output": str((OUTPUT_ROOT / paper.path.stem).resolve()),
+                "pages": [
+                    {"number": page.number, "width": page.width, "height": page.height,
+                     "url": f"/pages/{paper.id}/{page.number}.jpg"}
+                    for page in analysis.pages
+                ],
+                "boxes": [box.to_dict() for box in analysis.boxes],
+                "files": paper.saved_files,
+                "manifest": "manifest.json" if paper.saved_manifest else None,
+            }
+        except HTTPException:
+            if paper is not None and paper in session.papers:
+                session.papers.remove(paper)
+            raise
+        except Exception as exc:
+            if paper is not None and paper in session.papers:
+                session.papers.remove(paper)
+            raise HTTPException(status_code=400, detail=f"Could not process PDF: {exc}") from exc
 
     @app.get("/api/papers")
     def list_papers() -> list[dict]:
@@ -123,6 +198,8 @@ def create_app(session: ReviewSession) -> FastAPI:
                 for page in analysis.pages
             ],
             "boxes": [box.to_dict() for box in analysis.boxes],
+            "files": paper.saved_files,
+            "manifest": "manifest.json" if paper.saved_manifest else None,
         }
 
     @app.get("/pages/{paper_id}/{page_number}.jpg")
@@ -176,10 +253,27 @@ def create_app(session: ReviewSession) -> FastAPI:
         except (CropperError, ValueError, OSError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+        paper.saved_files = [path.name for path in result.files]
+        paper.saved_manifest = True
         return {
-            "files": [path.name for path in result.files],
+            "files": paper.saved_files,
             "manifest": result.manifest_path.name,
             "output_dir": str(result.output_dir.resolve()),
         }
+
+    @app.get("/outputs/{paper_id}/{filename}")
+    def download_output(paper_id: int, filename: str) -> FileResponse:
+        paper = session.get(paper_id)
+        if filename == "manifest.json":
+            allowed = paper.saved_manifest
+        else:
+            allowed = filename in paper.saved_files and Path(filename).name == filename
+        if not allowed:
+            raise HTTPException(status_code=404, detail="Output file not found.")
+        path = OUTPUT_ROOT / paper.path.stem / filename
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Output file not found.")
+        media_type = "image/png" if path.suffix.lower() == ".png" else "application/json"
+        return FileResponse(path, media_type=media_type)
 
     return app

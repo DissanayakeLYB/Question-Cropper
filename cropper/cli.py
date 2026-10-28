@@ -95,15 +95,18 @@ def main(argv: list[str] | None = None) -> int:
     auto_parser = subparsers.add_parser("auto", help="detect and crop every question automatically")
     auto_parser.add_argument("input", type=Path, help="a PDF file or a folder of PDFs")
 
-    review_parser = subparsers.add_parser("review", help="open the review page to fix boxes and save")
-    review_parser.add_argument("input", type=Path, help="a PDF file or a folder of PDFs")
+    review_parser = subparsers.add_parser("review", help="open the review page to upload PDFs and crop questions")
+    review_parser.add_argument("input", type=Path, nargs="?", help="optional PDF file or folder of PDFs")
 
     args = parser.parse_args(argv)
-    try:
-        pdfs = collect_pdfs(args.input)
-    except CropperError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
+    if args.command == "review" and args.input is None:
+        pdfs = []
+    else:
+        try:
+            pdfs = collect_pdfs(args.input)
+        except CropperError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
     if args.command == "auto":
         return run_auto(pdfs)

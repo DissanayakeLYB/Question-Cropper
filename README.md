@@ -77,27 +77,32 @@ output/2019/
   manifest.json
 ```
 
-### Review
+### Upload and crop in the browser
+
+For the simple upload-first workflow, run:
+
+```bash
+python -m cropper review
+```
+
+The browser opens to a **Choose a PDF** page. Select a PDF; Question Cropper detects and crops it, saves one PNG per detected question, and displays the results with download links and the manifest. The upload limit is 100 MB. Scanned papers need Tesseract installed.
+
+You can also open the review page with an existing PDF or a folder:
 
 ```bash
 python -m cropper review paper.pdf
-```
-
-A folder works too; use the Paper dropdown to switch between PDFs:
-
-```bash
 python -m cropper review papers/
 ```
 
-This starts a local server on `127.0.0.1` (on an available port), prints the URL, and opens it in your browser.
+Those PDFs load into the same page for review; folders can be switched with the Paper dropdown. The server runs on `127.0.0.1` using an available port.
 
-On the review page:
+To correct detected boxes before downloading:
 
 1. Use **Previous page / Next page** or the page dropdown to inspect every page.
 2. Click a box to select it. Drag the box body to move it, or drag one of its eight handles to resize it.
 3. Click **+ Add box**, then drag on the page to draw a missing question box. A click without dragging creates a default-sized box. Edit **Question** to set its number.
 4. Select a box and click **Delete box** (or press Delete) to remove a wrong box.
-5. Click **Save PNGs** to write the final images and `manifest.json`.
+5. Click **Save PNGs** to regenerate and display the final images and `manifest.json`.
 
 A question that continues onto another page is represented by one box on each page, both with the same question number. On Save, boxes with the same number are stacked into one PNG, in page order. To join a continuation, set both boxes to the same number.
 

@@ -13,17 +13,19 @@
         <span class="mark">QC</span>
         <div>
           <h1>Question Cropper</h1>
-          <p>Review detected boxes, fix them, then save the PNGs.</p>
+          <p>Upload a PDF and get one cropped PNG per question.</p>
         </div>
       </div>
       <div class="paper-actions">
-        <label class="field">Paper
+        <label class="field existing-paper hidden">Paper
           <select id="paper-select" aria-label="Paper"></select>
         </label>
-        <button id="save-button" class="btn primary" type="button">Save PNGs</button>
+        <input id="upload-input" type="file" accept="application/pdf,.pdf" hidden>
+        <button id="upload-button" class="btn" type="button">Choose PDF</button>
+        <button id="save-button" class="btn primary" type="button" disabled>Save PNGs</button>
       </div>
     </div>
-    <div class="bar toolbar">
+    <div id="toolbar" class="bar toolbar hidden">
       <div class="page-nav">
         <button id="prev-page" class="btn icon" type="button" title="Previous page" aria-label="Previous page">‹</button>
         <select id="page-select" aria-label="Page"></select>
@@ -42,7 +44,25 @@
   </header>
 
   <main id="workspace">
-    <div id="stage-shell">
+    <section id="welcome" class="welcome">
+      <div class="upload-icon">↑</div>
+      <h2>Crop questions from a past paper</h2>
+      <p>Choose one PDF. Question Cropper will detect the questions and save a PNG for each.</p>
+      <button id="welcome-upload" class="btn primary" type="button">Choose a PDF</button>
+      <p class="upload-note">Text PDFs and scans supported. Scans need Tesseract installed.</p>
+    </section>
+    <section id="paper-workspace" class="paper-workspace hidden">
+      <section id="results" class="results hidden" aria-live="polite">
+        <div class="results-heading">
+          <div>
+            <h2 id="results-title">Cropped questions</h2>
+            <p id="results-summary"></p>
+          </div>
+          <a id="manifest-download" class="btn" href="#" download>Download manifest</a>
+        </div>
+        <div id="result-grid" class="result-grid"></div>
+      </section>
+      <div id="stage-shell">
       <div id="stage">
         <img id="page-image" alt="PDF page">
         <div id="overlay"></div>
@@ -51,7 +71,8 @@
           <span id="loading-text">Reading PDF…</span>
         </div>
       </div>
-    </div>
+      </div>
+    </section>
   </main>
 
   <div id="toast" class="toast hidden" role="status"></div>

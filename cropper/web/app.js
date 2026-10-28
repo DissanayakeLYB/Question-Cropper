@@ -5,6 +5,18 @@ const HANDLE_DIRECTIONS = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
 const els = {
   paperSelect: document.getElementById("paper-select"),
+  uploadInput: document.getElementById("upload-input"),
+  uploadButton: document.getElementById("upload-button"),
+  welcomeUpload: document.getElementById("welcome-upload"),
+  welcome: document.getElementById("welcome"),
+  paperWorkspace: document.getElementById("paper-workspace"),
+  results: document.getElementById("results"),
+  resultsTitle: document.getElementById("results-title"),
+  resultsSummary: document.getElementById("results-summary"),
+  resultGrid: document.getElementById("result-grid"),
+  manifestDownload: document.getElementById("manifest-download"),
+  existingPaper: document.querySelector(".existing-paper"),
+  toolbar: document.getElementById("toolbar"),
   pageSelect: document.getElementById("page-select"),
   pageTotal: document.getElementById("page-total"),
   prevPage: document.getElementById("prev-page"),
@@ -101,6 +113,8 @@ function makeState(data) {
     selectedId: null,
     nextId,
     saveMessage: "",
+    files: data.files || [],
+    manifest: data.manifest || null,
   };
 }
 
@@ -148,6 +162,12 @@ function activate(state) {
   paperStates.set(state.data.id, state);
   adding = false;
   els.overlay.classList.remove("adding");
+  els.welcome.classList.add("hidden");
+  els.paperWorkspace.classList.remove("hidden");
+  els.toolbar.classList.remove("hidden");
+  els.results.classList.toggle("hidden", state.files.length === 0);
+  els.existingPaper.classList.toggle("hidden", papers.length < 2);
+  renderResults();
   els.paperSelect.value = String(state.data.id);
   els.saveStatus.textContent = state.saveMessage || "";
 
@@ -267,6 +287,7 @@ function updateControls() {
   const total = active ? active.data.pages.length : 0;
   const locked = busy || saving;
   els.paperSelect.disabled = locked;
+  els.uploadButton.disabled = locked;
   els.pageSelect.disabled = !active || locked;
   els.prevPage.disabled = !active || locked || active.page <= 1;
   els.nextPage.disabled = !active || locked || active.page >= total;
@@ -284,6 +305,96 @@ function setAdding(value) {
   adding = value;
   els.overlay.classList.toggle("adding", adding);
   updateControls();
+}
+
+function renderResults() {
+  if (!active) {
+    return;
+  }
+  const files = active.files || [];
+  els.results.classList.toggle("hidden", files.length === 0);
+  els.resultsTitle.textContent = `Cropped questions · ${active.data.name}`;
+  els.resultsSummary.textContent = files.length
+    ? `${files.length} question image${files.length === 1 ? "" : "s"} saved to ${active.data.output}`
+    : "No automatic crops yet. Add or adjust boxes below, then save PNGs.";
+  els.manifestDownload.classList.toggle("hidden", !active.manifest);
+  els.manifestDownload.href = active.manifest
+    ? `/outputs/${active.data.id}/${encodeURIComponent(active.manifest)}`
+    : "#";
+  els.resultGrid.replaceChildren();
+
+  for (const filename of files) {
+    const card = document.createElement("article");
+    card.className = "result-card";
+    const image = document.createElement("img");
+    image.src = `/outputs/${active.data.id}/${encodeURIComponent(filename)}`;
+    image.alt = filename;
+    image.loading = "lazy";
+    const info = document.createElement("div");
+    info.className = "result-info";
+    const name = document.createElement("span");
+    name.textContent = filename;
+    const download = document.createElement("a");
+    download.className = "download-link";
+    download.href = image.src;
+    download.download = filename;
+    download.textContent = "Download PNG";
+    info.append(name, download);
+    card.append(image, info);
+    els.resultGrid.appendChild(card);
+  }
+}
+
+async function uploadFile(file) {
+  if (!file || busy || saving) {
+    return;
+  }
+  if (!file.name.toLowerCase().endsWith(".pdf")) {
+    toast("Choose a PDF file.", true);
+    els.uploadInput.value = "";
+    return;
+  }
+
+  busy = true;
+  showLoading(`Uploading and cropping ${file.name}…`);
+  updateControls();
+  try {
+    const result = await api(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/pdf" },
+      body: file,
+    });
+    const state = makeState(result);
+    state.files = result.files || [];
+    state.manifest = result.manifest || null;
+    paperStates.set(result.id, state);
+
+    const existingOption = [...els.paperSelect.options].find((option) => Number(option.value) === result.id);
+    if (!existingOption) {
+      const option = document.createElement("option");
+      option.value = String(result.id);
+      option.textContent = result.name;
+      els.paperSelect.appendChild(option);
+    }
+    if (!papers.some((paper) => paper.id === result.id)) {
+      papers.push({ id: result.id, name: result.name, page_count: result.page_count });
+    }
+    activate(state);
+    els.results.classList.remove("hidden");
+    renderResults();
+    if (state.files.length) {
+      toast(`Cropped ${state.files.length} question image(s). Download them below.`);
+    } else {
+      toast("No question starts were detected. Add boxes below, then save.", true);
+    }
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    busy = false;
+    hideLoading();
+    updateControls();
+    els.uploadInput.value = "";
+  }
 }
 
 function nextQuestionNumber() {
@@ -570,9 +681,13 @@ async function saveAll() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ boxes: active.boxes.map(serializeBox) }),
     });
-    active.saveMessage = `Saved ${result.files.length} PNG(s) + ${result.manifest} → ${result.output_dir}`;
+    active.files = result.files;
+    active.manifest = result.manifest;
+    active.data.output = result.output_dir;
+    active.saveMessage = `Saved ${result.files.length} PNG(s) + ${result.manifest}`;
     els.saveStatus.textContent = active.saveMessage;
-    toast(`Saved ${result.files.length} question PNG(s) to ${result.output_dir}`);
+    renderResults();
+    toast(`Saved ${result.files.length} question PNG(s). Download them above.`);
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -582,6 +697,15 @@ async function saveAll() {
 }
 
 function bindEvents() {
+  const openFilePicker = () => els.uploadInput.click();
+  els.uploadButton.addEventListener("click", openFilePicker);
+  els.welcomeUpload.addEventListener("click", openFilePicker);
+  els.uploadInput.addEventListener("change", () => {
+    const file = els.uploadInput.files && els.uploadInput.files[0];
+    if (file) {
+      uploadFile(file);
+    }
+  });
   els.paperSelect.addEventListener("change", () => {
     const paperId = Number.parseInt(els.paperSelect.value, 10);
     if (Number.isFinite(paperId)) {
