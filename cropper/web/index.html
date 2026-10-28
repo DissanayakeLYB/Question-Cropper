@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Question Cropper</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="bar">
+      <div class="brand">
+        <span class="mark">QC</span>
+        <div>
+          <h1>Question Cropper</h1>
+          <p>Review detected boxes, fix them, then save the PNGs.</p>
+        </div>
+      </div>
+      <div class="paper-actions">
+        <label class="field">Paper
+          <select id="paper-select" aria-label="Paper"></select>
+        </label>
+        <button id="save-button" class="btn primary" type="button">Save PNGs</button>
+      </div>
+    </div>
+    <div class="bar toolbar">
+      <div class="page-nav">
+        <button id="prev-page" class="btn icon" type="button" title="Previous page" aria-label="Previous page">‹</button>
+        <select id="page-select" aria-label="Page"></select>
+        <span id="page-total" class="muted"></span>
+        <button id="next-page" class="btn icon" type="button" title="Next page" aria-label="Next page">›</button>
+      </div>
+      <span class="divider"></span>
+      <button id="add-box" class="btn" type="button">+ Add box</button>
+      <button id="delete-box" class="btn danger" type="button" disabled>Delete box</button>
+      <label class="field question-field">Question
+        <input id="question-input" type="number" min="1" step="1" disabled>
+      </label>
+      <span id="hint" class="hint">Click a box to select it. Drag to move, drag a handle to resize.</span>
+      <span id="save-status" class="save-status"></span>
+    </div>
+  </header>
+
+  <main id="workspace">
+    <div id="stage-shell">
+      <div id="stage">
+        <img id="page-image" alt="PDF page">
+        <div id="overlay"></div>
+        <div id="loading" class="loading hidden">
+          <div class="spinner"></div>
+          <span id="loading-text">Reading PDF…</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
