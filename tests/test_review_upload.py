@@ -142,6 +142,8 @@ class UploadUiTests(unittest.TestCase):
         self.assertIn("Crop questions from a past paper", page)
         self.assertIn('id="toolbar" class="bar toolbar hidden"', page)
         self.assertIn('id="save-button" class="btn primary" type="button" disabled', page)
+        self.assertIn('id="expected-input"', page)
+        self.assertIn('id="detection-summary"', page)
 
 
 if __name__ == "__main__":

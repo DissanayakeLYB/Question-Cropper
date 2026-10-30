@@ -34,6 +34,12 @@ python -m cropper auto paper.pdf
 python -m cropper auto papers/
 ```
 
+Papers are assumed to have 50 questions; pass the real count with `-n` (or `--expected`) for anything else:
+
+```bash
+python -m cropper auto paper.pdf -n 40
+```
+
 Open the review page with no arguments to start from an upload, then pick a PDF (up to 100 MB):
 
 ```bash
@@ -55,7 +61,7 @@ Each PDF writes to `output/<pdf name>/`, with one PNG per question named like `2
 
 ## How it works
 
-Pages are rendered at 200 DPI, and question starts are found at the left edge of each column using the PDF text layer, or Tesseract OCR. Scanned pages are read twice with two different page-segmentation modes and the results are combined, because a single pass can silently drop a question number next to the page edge. Headers, footers, and page numbers are excluded, and a detected central gutter selects one- or two-column reading order. Each crop runs from one question number to the next, is trimmed to its ink, and is padded by 10 px.
+Pages are rendered at 200 DPI, and question starts are found where the PDF text layer, the OCR text and the column geometry agree. Scanned pages are read twice with two different page-segmentation modes and the results are combined, because a single pass can silently drop a question number next to the page edge. A number is only accepted when it sits on the same left edge as the other question numbers in its column, which rejects numbers inside body text. Missing numbers are then searched between their neighbours: first in the extracted text, then with a 300 DPI OCR pass over the left margin at a lower confidence threshold, and finally as a blank gap between text blocks. Headers, footers, and page numbers are excluded, and a detected central gutter selects one- or two-column reading order. Each crop runs from one question number to the next, is trimmed to its ink, and is padded by 10 px.
 
 ## Tests
 
@@ -67,4 +73,4 @@ The tests generate their own PDFs; OCR tests are skipped when Tesseract is not i
 
 ## Limitations
 
-Automatic detection is a heuristic, so check the review page for each new paper. OCR quality depends on the scan, a figure crossing the central gutter can be split, and unusual layouts or numbering may need manual boxes. When a question number cannot be found, the number is reported in the terminal and on the review page so you can add that box yourself.
+Automatic detection is a heuristic, so check the review page for each new paper. OCR quality depends on the scan, a figure crossing the central gutter can be split, and unusual layouts or numbering may need manual boxes. When a question number cannot be found, the paper is assumed to have 50 questions unless you set the count; the review page shows how many were found and which numbers are missing so you can add those boxes yourself.

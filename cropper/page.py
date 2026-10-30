@@ -79,8 +79,14 @@ def text_lines(page: pymupdf.Page, width: int, height: int) -> list[TextLine]:
 # "psm 6" (uniform block) keeps those numbers. Merging both recovers them.
 OCR_PSMS = (3, 6)
 
+# Words below this Tesseract confidence are dropped. A rescue pass over a small
+# region lowers it, because faint question numbers score poorly on their own.
+MIN_OCR_CONFIDENCE = 30
 
-def _ocr_pass(image: Image.Image, psm: int) -> list[TextLine]:
+
+def _ocr_pass(
+    image: Image.Image, psm: int, min_confidence: float = MIN_OCR_CONFIDENCE
+) -> list[TextLine]:
     """Run one Tesseract pass and return its line boxes in image pixels."""
     try:
         data = pytesseract.image_to_data(
@@ -105,7 +111,7 @@ def _ocr_pass(image: Image.Image, psm: int) -> list[TextLine]:
             confidence = float(data["conf"][i])
         except (KeyError, TypeError, ValueError):
             continue
-        if confidence < 30:
+        if confidence < min_confidence:
             continue
 
         key = (int(data["block_num"][i]), int(data["par_num"][i]), int(data["line_num"][i]))
@@ -144,11 +150,15 @@ def _ocr_pass(image: Image.Image, psm: int) -> list[TextLine]:
     return lines
 
 
-def ocr_lines(image: Image.Image) -> list[TextLine]:
-    """OCR a page with Tesseract and return the merged line boxes."""
+def ocr_lines(
+    image: Image.Image,
+    psms: tuple[int, ...] = OCR_PSMS,
+    min_confidence: float = MIN_OCR_CONFIDENCE,
+) -> list[TextLine]:
+    """OCR an image with Tesseract and return the merged line boxes."""
     lines: list[TextLine] = []
-    for psm in OCR_PSMS:
-        lines.extend(_ocr_pass(image, psm))
+    for psm in psms:
+        lines.extend(_ocr_pass(image, psm, min_confidence))
     return _dedupe_lines(lines)
 
 

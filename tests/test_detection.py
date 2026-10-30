@@ -158,7 +158,8 @@ class DetectionTests(unittest.TestCase):
         pdf = self.dir / "2019.pdf"
         make_single_column_pdf(pdf)
 
-        analysis = analyze_pdf(pdf)
+        # The fixture has four questions; the default expected count is 50.
+        analysis = analyze_pdf(pdf, expected_count=4)
         self.assertEqual(analysis.gaps, [])
 
 

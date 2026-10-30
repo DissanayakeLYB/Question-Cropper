@@ -15,7 +15,8 @@ const els = {
   resultsSummary: document.getElementById("results-summary"),
   resultGrid: document.getElementById("result-grid"),
   manifestDownload: document.getElementById("manifest-download"),
-  detectionWarning: document.getElementById("detection-warning"),
+  detectionSummary: document.getElementById("detection-summary"),
+  expectedInput: document.getElementById("expected-input"),
   existingPaper: document.querySelector(".existing-paper"),
   toolbar: document.getElementById("toolbar"),
   pageSelect: document.getElementById("page-select"),
@@ -133,9 +134,9 @@ function selectedBox() {
   return active.boxes.find((box) => box.id === active.selectedId) || null;
 }
 
-async function openPaper(paperId) {
+async function openPaper(paperId, expected = expectedValue()) {
   const existing = paperStates.get(paperId);
-  if (existing) {
+  if (existing && existing.data.expected === expected) {
     activate(existing);
     return;
   }
@@ -144,7 +145,7 @@ async function openPaper(paperId) {
   setBusy(true);
   showLoading("Reading PDF…");
   try {
-    const data = await api(`/api/papers/${paperId}`);
+    const data = await api(`/api/papers/${paperId}?expected=${expected}`);
     const state = makeState(data);
     paperStates.set(paperId, state);
     activate(state);
@@ -171,7 +172,7 @@ function activate(state) {
   renderResults();
   els.paperSelect.value = String(state.data.id);
   els.saveStatus.textContent = state.saveMessage || "";
-  renderWarning(state);
+  renderSummary(state);
 
   els.pageSelect.innerHTML = "";
   for (const page of state.data.pages) {
@@ -216,7 +217,7 @@ function applyBoxRect(element, box, page) {
 
 function renderBoxes() {
   els.overlay.innerHTML = "";
-  renderWarning(active);
+  renderSummary(active);
   if (!active) {
     updateSelectionUi();
     return;
@@ -327,22 +328,28 @@ function formatRanges(numbers) {
   return parts.join(", ");
 }
 
-function renderWarning(state) {
+function expectedValue() {
+  const parsed = Number.parseInt(els.expectedInput.value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return 50;
+  }
+  return Math.min(parsed, 200);
+}
+
+function renderSummary(state) {
   if (!active) {
-    els.detectionWarning.classList.add("hidden");
+    els.detectionSummary.textContent = "";
+    els.detectionSummary.classList.remove("has-gaps");
     return;
   }
+  const expected = state.data.expected || expectedValue();
   const covered = new Set(active.boxes.map((box) => box.question));
-  const gaps = (state.data.gaps || []).filter((number) => !covered.has(number));
-  if (!gaps.length) {
-    els.detectionWarning.textContent = "";
-    els.detectionWarning.classList.add("hidden");
-    return;
-  }
-  els.detectionWarning.textContent =
-    `No question start found for ${formatRanges(gaps)}. ` +
-    "The box before each missing number may contain it - check those pages before saving.";
-  els.detectionWarning.classList.remove("hidden");
+  const missing = (state.data.gaps || []).filter((number) => !covered.has(number));
+  const found = Math.max(0, expected - missing.length);
+  els.detectionSummary.textContent = missing.length
+    ? `Found ${found} of ${expected} · missing ${formatRanges(missing)}`
+    : `Found ${found} of ${expected}`;
+  els.detectionSummary.classList.toggle("has-gaps", missing.length > 0);
 }
 
 function renderResults() {
@@ -397,7 +404,10 @@ async function uploadFile(file) {
   showLoading(`Uploading and cropping ${file.name}…`);
   updateControls();
   try {
-    const result = await api(`/api/upload?filename=${encodeURIComponent(file.name)}`, {
+    const expected = expectedValue();
+    const result = await api(
+      `/api/upload?filename=${encodeURIComponent(file.name)}&expected=${expected}`,
+      {
       method: "POST",
       headers: { "Content-Type": "application/pdf" },
       body: file,
@@ -653,7 +663,7 @@ function onQuestionInput() {
     label.textContent = `Q${value}`;
   }
   clearSaveStatus();
-  renderWarning(active);
+  renderSummary(active);
 }
 
 function onQuestionChange() {
@@ -672,7 +682,7 @@ function onQuestionChange() {
     label.textContent = `Q${value}`;
   }
   clearSaveStatus();
-  renderWarning(active);
+  renderSummary(active);
 }
 
 function deleteSelected() {
@@ -749,7 +759,15 @@ function bindEvents() {
   els.paperSelect.addEventListener("change", () => {
     const paperId = Number.parseInt(els.paperSelect.value, 10);
     if (Number.isFinite(paperId)) {
-      openPaper(paperId);
+      openPaper(paperId, expectedValue());
+    }
+  });
+  els.expectedInput.addEventListener("change", () => {
+    const expected = expectedValue();
+    els.expectedInput.value = String(expected);
+    if (active) {
+      paperStates.delete(active.data.id);
+      openPaper(active.data.id, expected);
     }
   });
   els.pageSelect.addEventListener("change", () => {
@@ -811,7 +829,7 @@ async function init() {
       option.textContent = paper.name;
       els.paperSelect.appendChild(option);
     }
-    await openPaper(papers[0].id);
+    await openPaper(papers[0].id, expectedValue());
   } catch (error) {
     toast(error.message, true);
   }

@@ -9,7 +9,7 @@ import threading
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -39,9 +39,15 @@ class SavePayload(BaseModel):
 
 class ReviewPaper:
     def __init__(
-        self, paper_id: int, path: Path, preview_dir: Path, display_name: str | None = None
+        self,
+        paper_id: int,
+        path: Path,
+        preview_dir: Path,
+        display_name: str | None = None,
+        expected_count: int = 50,
     ) -> None:
         self.id = paper_id
+        self.expected_count = expected_count
         self.path = path
         self.preview_dir = preview_dir
         self.display_name = display_name or path.name
@@ -59,13 +65,15 @@ class ReviewPaper:
     def name(self) -> str:
         return self.display_name
 
-    def load(self) -> PaperAnalysis:
-        if self.analysis is not None:
-            return self.analysis
+    def load(self, expected_count: int | None = None) -> PaperAnalysis:
+        target = self.expected_count if expected_count is None else expected_count
         with self._lock:
-            if self.analysis is None:
+            if self.analysis is None or self.analysis.expected != target:
                 self.preview_dir.mkdir(parents=True, exist_ok=True)
-                self.analysis = analyze_pdf(self.path, preview_dir=self.preview_dir)
+                self.analysis = analyze_pdf(
+                    self.path, preview_dir=self.preview_dir, expected_count=target
+                )
+            self.expected_count = target
             return self.analysis
 
     def preview_path(self, page_number: int) -> Path:
@@ -73,15 +81,25 @@ class ReviewPaper:
 
 
 class ReviewSession:
-    def __init__(self, pdfs: list[Path]) -> None:
+    def __init__(self, pdfs: list[Path], expected_count: int = 50) -> None:
         self.temp_dir = Path(tempfile.mkdtemp(prefix="question-cropper-review-"))
         atexit.register(self.cleanup)
+        self.expected_count = expected_count
         self.papers = [
-            ReviewPaper(index, path, self.temp_dir / str(index)) for index, path in enumerate(pdfs)
+            ReviewPaper(index, path, self.temp_dir / str(index), expected_count=expected_count)
+            for index, path in enumerate(pdfs)
         ]
 
-    def add_pdf(self, path: Path, display_name: str | None = None) -> ReviewPaper:
-        paper = ReviewPaper(len(self.papers), path, self.temp_dir / str(len(self.papers)), display_name)
+    def add_pdf(
+        self, path: Path, display_name: str | None = None, expected_count: int | None = None
+    ) -> ReviewPaper:
+        paper = ReviewPaper(
+            len(self.papers),
+            path,
+            self.temp_dir / str(len(self.papers)),
+            display_name,
+            expected_count or self.expected_count,
+        )
         self.papers.append(paper)
         return paper
 
@@ -104,7 +122,9 @@ def create_app(session: ReviewSession) -> FastAPI:
         return FileResponse(WEB_DIR / "index.html")
 
     @app.post("/api/upload")
-    async def upload_pdf(request: Request, filename: str) -> dict:
+    async def upload_pdf(
+        request: Request, filename: str, expected: int = Query(50, ge=1, le=200)
+    ) -> dict:
         safe_name = Path(filename.replace("\\", "/")).name
         safe_name = "".join(char for char in safe_name if char.isprintable() and char not in '<>:"|?*')
         if not safe_name or Path(safe_name).suffix.lower() != ".pdf":
@@ -132,7 +152,7 @@ def create_app(session: ReviewSession) -> FastAPI:
                     output.write(chunk)
 
             try:
-                paper = session.add_pdf(pdf_path, safe_name)
+                paper = session.add_pdf(pdf_path, safe_name, expected)
                 analysis = paper.load()
                 if analysis.boxes:
                     result = save_questions(pdf_path, analysis.boxes, output_root=OUTPUT_ROOT)
@@ -155,6 +175,8 @@ def create_app(session: ReviewSession) -> FastAPI:
                 ],
                 "boxes": [box.to_dict() for box in analysis.boxes],
                 "gaps": analysis.gaps,
+                "expected": analysis.expected,
+                "found": len({box.question for box in analysis.boxes}),
                 "files": paper.saved_files,
                 "manifest": "manifest.json" if paper.saved_manifest else None,
             }
@@ -175,10 +197,10 @@ def create_app(session: ReviewSession) -> FastAPI:
         ]
 
     @app.get("/api/papers/{paper_id}")
-    def get_paper(paper_id: int) -> dict:
+    def get_paper(paper_id: int, expected: int = Query(50, ge=1, le=200)) -> dict:
         paper = session.get(paper_id)
         try:
-            analysis = paper.load()
+            analysis = paper.load(expected)
         except CropperError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
@@ -200,6 +222,8 @@ def create_app(session: ReviewSession) -> FastAPI:
             ],
             "boxes": [box.to_dict() for box in analysis.boxes],
             "gaps": analysis.gaps,
+            "expected": analysis.expected,
+            "found": len({box.question for box in analysis.boxes}),
             "files": paper.saved_files,
             "manifest": "manifest.json" if paper.saved_manifest else None,
         }

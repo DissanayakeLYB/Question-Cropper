@@ -7,14 +7,9 @@ from pathlib import Path
 
 from . import DPI
 from .crop import trim_segment
-from .detect import (
-    build_segments,
-    detect_columns,
-    detect_margins,
-    find_question_gaps,
-    find_question_starts,
-)
+from .detect import build_segments, detect_columns, detect_margins, find_question_starts
 from .models import Box, PageInfo, PaperAnalysis
+from .repair import rescue_missing_starts
 from .page import (
     has_text_layer,
     make_thumbnail,
@@ -31,6 +26,7 @@ def analyze_pdf(
     dpi: int = DPI,
     preview_dir: Path | None = None,
     progress: Callable[[int, int], None] | None = None,
+    expected_count: int = 50,
 ) -> PaperAnalysis:
     """Read a PDF and return the detected question boxes.
 
@@ -68,8 +64,8 @@ def analyze_pdf(
         for page in pages:
             detect_columns(page)
         starts = find_question_starts(pages)
+        starts = rescue_missing_starts(doc, pages, starts, expected_count)
         segments = build_segments(starts, pages)
-        gaps = find_question_gaps(starts)
 
         segments_by_page: dict[int, list] = {}
         for segment in segments:
@@ -85,6 +81,12 @@ def analyze_pdf(
                     boxes.append(box)
 
         boxes.sort(key=lambda box: (box.question, box.page, box.y0, box.x0))
-        return PaperAnalysis(path=path, dpi=dpi, pages=pages, boxes=boxes, gaps=gaps)
+        # Report gaps from the images that were actually produced, so "found N
+        # of M" can never claim a question whose crop came out empty.
+        found = {box.question for box in boxes}
+        gaps = [value for value in range(1, expected_count + 1) if value not in found]
+        return PaperAnalysis(
+            path=path, dpi=dpi, pages=pages, boxes=boxes, gaps=gaps, expected=expected_count
+        )
     finally:
         doc.close()

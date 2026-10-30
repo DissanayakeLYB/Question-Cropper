@@ -107,6 +107,7 @@ class PaperAnalysis:
     pages: list[PageInfo]
     boxes: list[Box]
     gaps: list[int] = field(default_factory=list)
+    expected: int = 50
 
     @property
     def stem(self) -> str:

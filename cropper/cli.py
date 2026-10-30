@@ -30,12 +30,12 @@ def collect_pdfs(target: Path) -> list[Path]:
     raise CropperError(f"{target} does not exist.")
 
 
-def run_auto(pdfs: list[Path]) -> int:
+def run_auto(pdfs: list[Path], expected_count: int = 50) -> int:
     failures = 0
     for pdf in pdfs:
         print(f"{pdf.name}: reading...")
         try:
-            analysis = analyze_pdf(pdf)
+            analysis = analyze_pdf(pdf, expected_count=expected_count)
         except CropperError as exc:
             print(f"  error: {exc}", file=sys.stderr)
             failures += 1
@@ -71,12 +71,12 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def run_review(pdfs: list[Path]) -> int:
+def run_review(pdfs: list[Path], expected_count: int = 50) -> int:
     import uvicorn
 
     from .review import ReviewSession, create_app
 
-    session = ReviewSession(pdfs)
+    session = ReviewSession(pdfs, expected_count=expected_count)
     app = create_app(session)
     port = _free_port()
     url = f"http://127.0.0.1:{port}/"
@@ -102,9 +102,25 @@ def main(argv: list[str] | None = None) -> int:
 
     auto_parser = subparsers.add_parser("auto", help="detect and crop every question automatically")
     auto_parser.add_argument("input", type=Path, help="a PDF file or a folder of PDFs")
+    auto_parser.add_argument(
+        "-n",
+        "--expected",
+        type=int,
+        default=50,
+        metavar="COUNT",
+        help="how many questions the paper has (default 50)",
+    )
 
     review_parser = subparsers.add_parser("review", help="open the review page to upload PDFs and crop questions")
     review_parser.add_argument("input", type=Path, nargs="?", help="optional PDF file or folder of PDFs")
+    review_parser.add_argument(
+        "-n",
+        "--expected",
+        type=int,
+        default=50,
+        metavar="COUNT",
+        help="how many questions the paper has (default 50)",
+    )
 
     args = parser.parse_args(argv)
     if args.command == "review" and args.input is None:
@@ -117,9 +133,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     if args.command == "auto":
-        return run_auto(pdfs)
+        return run_auto(pdfs, expected_count=args.expected)
     try:
-        return run_review(pdfs)
+        return run_review(pdfs, expected_count=args.expected)
     except CropperError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

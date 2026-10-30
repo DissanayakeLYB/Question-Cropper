@@ -246,10 +246,48 @@ def _percentile(values: list[float], fraction: float) -> float:
     return ordered[index]
 
 
+def question_alignments(
+    page: PageInfo, tolerance: float | None = None
+) -> dict[int, float]:
+    """The x position shared by the question numbers, per column.
+
+    Question numbers are printed at the same left edge within a column, so the
+    most populated cluster of candidate positions is that column's number
+    column. Columns without enough candidates are left out.
+    """
+    if tolerance is None:
+        tolerance = max(12.0, page.width * 0.015)
+    positions: dict[int, list[float]] = {index: [] for index in range(len(page.columns))}
+    for line in page.lines:
+        if line.y1 <= page.content_top + 1 or line.y0 >= page.content_bottom - 1:
+            continue
+        if not QUESTION_RE.match(line.text):
+            continue
+        index = 0 if len(page.columns) == 1 else int(line.x0 >= page.columns[0].x1)
+        positions.setdefault(index, []).append(line.x0)
+
+    alignments: dict[int, float] = {}
+    for index, values in positions.items():
+        if len(values) < 2:
+            continue
+        values.sort()
+        clusters: list[list[float]] = [[values[0]]]
+        for x in values[1:]:
+            if x - clusters[-1][-1] <= tolerance:
+                clusters[-1].append(x)
+            else:
+                clusters.append([x])
+        largest = max(clusters, key=len)
+        if len(largest) >= 2:
+            alignments[index] = _percentile(largest, 0.5)
+    return alignments
+
+
 def find_question_starts(pages: list[PageInfo]) -> list[QuestionStart]:
     starts: list[QuestionStart] = []
     for page in pages:
         tolerance = max(12.0, page.width * 0.015)
+        alignments = question_alignments(page, tolerance)
         for line in page.lines:
             if line.y1 <= page.content_top + 1 or line.y0 >= page.content_bottom - 1:
                 continue
@@ -263,7 +301,13 @@ def find_question_starts(pages: list[PageInfo]) -> list[QuestionStart]:
                 continue
             column_index = 0 if len(page.columns) == 1 else int(line.x0 >= page.columns[0].x1)
             column = page.columns[column_index]
-            if line.x0 > column.left_margin + tolerance:
+            alignment = alignments.get(column_index)
+            if alignment is not None:
+                # Real question numbers line up with each other; this rejects
+                # numbers inside body text such as "2.0 s".
+                if abs(line.x0 - alignment) > tolerance:
+                    continue
+            elif line.x0 > column.left_margin + tolerance:
                 continue
             starts.append(QuestionStart(question, page.number, column_index, line.y0))
 
@@ -281,18 +325,23 @@ def find_question_starts(pages: list[PageInfo]) -> list[QuestionStart]:
     return deduped
 
 
-def find_question_gaps(starts: list[QuestionStart]) -> list[int]:
+def find_question_gaps(
+    starts: list[QuestionStart], expected: int | None = None
+) -> list[int]:
     """Question numbers missing from the expected run of the numbering.
 
-    Numbering normally starts at 1, so a missing first question is reported.
-    A paper that starts later (a page or section excerpt) is only checked for
-    gaps after its first detected number.
+    Pass ``expected`` (how many questions the paper should have) to check the
+    whole 1..N run. Without it the run is inferred from the detected numbers, so
+    a paper that starts later (a page or section excerpt) is only checked after
+    its first detected number.
     """
-    numbers = sorted({start.question for start in starts})
+    present = {start.question for start in starts}
+    if expected is not None and expected > 0:
+        return [value for value in range(1, expected + 1) if value not in present]
+    numbers = sorted(present)
     if not numbers:
         return []
     first = 1 if numbers[0] <= 2 else numbers[0]
-    present = set(numbers)
     return [value for value in range(first, numbers[-1] + 1) if value not in present]
 
 

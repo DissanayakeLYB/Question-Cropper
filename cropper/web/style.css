@@ -587,14 +587,22 @@ button:focus-visible {
   }
 }
 
-.detection-warning {
-  margin: 14px 0 0;
-  padding: 10px 14px;
-  border: 1px solid #f5c2a8;
-  border-left: 4px solid var(--orange);
-  border-radius: 8px;
-  background: #fff6f1;
-  color: #7a2e0e;
-  font-size: 0.9rem;
-  line-height: 1.45;
+.detection-summary {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef4ff;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.detection-summary.has-gaps {
+  background: #fff1e8;
+  color: #9a3412;
+}
+
+.expected-field input {
+  width: 74px;
 }

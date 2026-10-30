@@ -20,6 +20,9 @@
         <label class="field existing-paper hidden">Paper
           <select id="paper-select" aria-label="Paper"></select>
         </label>
+        <label class="field expected-field">Expected
+          <input id="expected-input" type="number" min="1" max="200" step="1" value="50" aria-label="Expected question count">
+        </label>
         <input id="upload-input" type="file" accept="application/pdf,.pdf" hidden>
         <button id="upload-button" class="btn" type="button">Choose PDF</button>
         <button id="save-button" class="btn primary" type="button" disabled>Save PNGs</button>
@@ -40,6 +43,7 @@
       </label>
       <span id="hint" class="hint">Click a box to select it. Drag to move, drag a handle to resize.</span>
       <span id="save-status" class="save-status"></span>
+      <span id="detection-summary" class="detection-summary" role="status"></span>
     </div>
   </header>
 
@@ -52,7 +56,6 @@
       <p class="upload-note">Text PDFs and scans supported. Scans need Tesseract installed.</p>
     </section>
     <section id="paper-workspace" class="paper-workspace hidden">
-      <p id="detection-warning" class="detection-warning hidden" role="status"></p>
       <section id="results" class="results hidden" aria-live="polite">
         <div class="results-heading">
           <div>
