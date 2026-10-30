@@ -7,7 +7,13 @@ from pathlib import Path
 
 from . import DPI
 from .crop import trim_segment
-from .detect import build_segments, detect_columns, detect_margins, find_question_starts
+from .detect import (
+    build_segments,
+    detect_columns,
+    detect_margins,
+    find_question_gaps,
+    find_question_starts,
+)
 from .models import Box, PageInfo, PaperAnalysis
 from .page import (
     has_text_layer,
@@ -63,6 +69,7 @@ def analyze_pdf(
             detect_columns(page)
         starts = find_question_starts(pages)
         segments = build_segments(starts, pages)
+        gaps = find_question_gaps(starts)
 
         segments_by_page: dict[int, list] = {}
         for segment in segments:
@@ -78,6 +85,6 @@ def analyze_pdf(
                     boxes.append(box)
 
         boxes.sort(key=lambda box: (box.question, box.page, box.y0, box.x0))
-        return PaperAnalysis(path=path, dpi=dpi, pages=pages, boxes=boxes)
+        return PaperAnalysis(path=path, dpi=dpi, pages=pages, boxes=boxes, gaps=gaps)
     finally:
         doc.close()

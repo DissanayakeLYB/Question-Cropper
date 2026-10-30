@@ -15,6 +15,7 @@ const els = {
   resultsSummary: document.getElementById("results-summary"),
   resultGrid: document.getElementById("result-grid"),
   manifestDownload: document.getElementById("manifest-download"),
+  detectionWarning: document.getElementById("detection-warning"),
   existingPaper: document.querySelector(".existing-paper"),
   toolbar: document.getElementById("toolbar"),
   pageSelect: document.getElementById("page-select"),
@@ -170,6 +171,7 @@ function activate(state) {
   renderResults();
   els.paperSelect.value = String(state.data.id);
   els.saveStatus.textContent = state.saveMessage || "";
+  renderWarning(state);
 
   els.pageSelect.innerHTML = "";
   for (const page of state.data.pages) {
@@ -214,6 +216,7 @@ function applyBoxRect(element, box, page) {
 
 function renderBoxes() {
   els.overlay.innerHTML = "";
+  renderWarning(active);
   if (!active) {
     updateSelectionUi();
     return;
@@ -305,6 +308,41 @@ function setAdding(value) {
   adding = value;
   els.overlay.classList.toggle("adding", adding);
   updateControls();
+}
+
+function formatRanges(numbers) {
+  const sorted = [...new Set(numbers)].sort((a, b) => a - b);
+  const parts = [];
+  let start = sorted[0];
+  let previous = sorted[0];
+  for (const value of sorted.slice(1)) {
+    if (value === previous + 1) {
+      previous = value;
+      continue;
+    }
+    parts.push(start === previous ? String(start) : `${start}-${previous}`);
+    start = previous = value;
+  }
+  parts.push(start === previous ? String(start) : `${start}-${previous}`);
+  return parts.join(", ");
+}
+
+function renderWarning(state) {
+  if (!active) {
+    els.detectionWarning.classList.add("hidden");
+    return;
+  }
+  const covered = new Set(active.boxes.map((box) => box.question));
+  const gaps = (state.data.gaps || []).filter((number) => !covered.has(number));
+  if (!gaps.length) {
+    els.detectionWarning.textContent = "";
+    els.detectionWarning.classList.add("hidden");
+    return;
+  }
+  els.detectionWarning.textContent =
+    `No question start found for ${formatRanges(gaps)}. ` +
+    "The box before each missing number may contain it - check those pages before saving.";
+  els.detectionWarning.classList.remove("hidden");
 }
 
 function renderResults() {
@@ -615,6 +653,7 @@ function onQuestionInput() {
     label.textContent = `Q${value}`;
   }
   clearSaveStatus();
+  renderWarning(active);
 }
 
 function onQuestionChange() {
@@ -633,6 +672,7 @@ function onQuestionChange() {
     label.textContent = `Q${value}`;
   }
   clearSaveStatus();
+  renderWarning(active);
 }
 
 function deleteSelected() {

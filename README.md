@@ -55,7 +55,7 @@ Each PDF writes to `output/<pdf name>/`, with one PNG per question named like `2
 
 ## How it works
 
-Pages are rendered at 200 DPI, and question starts are found at the left edge of each column using the PDF text layer or Tesseract OCR. Headers, footers, and page numbers are excluded, and a detected central gutter selects one- or two-column reading order. Each crop runs from one question number to the next, is trimmed to its ink, and is padded by 10 px.
+Pages are rendered at 200 DPI, and question starts are found at the left edge of each column using the PDF text layer, or Tesseract OCR. Scanned pages are read twice with two different page-segmentation modes and the results are combined, because a single pass can silently drop a question number next to the page edge. Headers, footers, and page numbers are excluded, and a detected central gutter selects one- or two-column reading order. Each crop runs from one question number to the next, is trimmed to its ink, and is padded by 10 px.
 
 ## Tests
 
@@ -67,4 +67,4 @@ The tests generate their own PDFs; OCR tests are skipped when Tesseract is not i
 
 ## Limitations
 
-Automatic detection is a heuristic, so check the review page for each new paper. OCR quality depends on the scan, a figure crossing the central gutter can be split, and unusual layouts or numbering may need manual boxes.
+Automatic detection is a heuristic, so check the review page for each new paper. OCR quality depends on the scan, a figure crossing the central gutter can be split, and unusual layouts or numbering may need manual boxes. When a question number cannot be found, the number is reported in the terminal and on the review page so you can add that box yourself.

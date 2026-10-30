@@ -269,18 +269,48 @@ def find_question_starts(pages: list[PageInfo]) -> list[QuestionStart]:
 
     starts.sort(key=lambda start: (start.page, start.column, start.y0))
     deduped: list[QuestionStart] = []
+    seen: dict[tuple[int, int, int], float] = {}
     for start in starts:
-        if deduped:
-            previous = deduped[-1]
-            if (
-                previous.page == start.page
-                and previous.column == start.column
-                and abs(previous.y0 - start.y0) < 6
-                and previous.question == start.question
-            ):
-                continue
+        key = (start.page, start.column, start.question)
+        band = max(6.0, pages[start.page - 1].height * 0.02)
+        last_y = seen.get(key)
+        if last_y is not None and abs(last_y - start.y0) < band:
+            continue
+        seen[key] = start.y0
         deduped.append(start)
     return deduped
+
+
+def find_question_gaps(starts: list[QuestionStart]) -> list[int]:
+    """Question numbers missing from the expected run of the numbering.
+
+    Numbering normally starts at 1, so a missing first question is reported.
+    A paper that starts later (a page or section excerpt) is only checked for
+    gaps after its first detected number.
+    """
+    numbers = sorted({start.question for start in starts})
+    if not numbers:
+        return []
+    first = 1 if numbers[0] <= 2 else numbers[0]
+    present = set(numbers)
+    return [value for value in range(first, numbers[-1] + 1) if value not in present]
+
+
+def format_number_ranges(numbers: list[int]) -> str:
+    """Compress [1, 4, 5, 9] into '1, 4-5, 9'."""
+    ordered = sorted(set(numbers))
+    if not ordered:
+        return ""
+    parts: list[str] = []
+    start = previous = ordered[0]
+    for value in ordered[1:]:
+        if value == previous + 1:
+            previous = value
+            continue
+        parts.append(f"{start}-{previous}" if start != previous else str(start))
+        start = previous = value
+    parts.append(f"{start}-{previous}" if start != previous else str(start))
+    return ", ".join(parts)
 
 
 def build_segments(starts: list[QuestionStart], pages: list[PageInfo]) -> list[Segment]:

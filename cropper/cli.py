@@ -9,6 +9,7 @@ import webbrowser
 from pathlib import Path
 
 from .crop import save_questions
+from .detect import format_number_ranges
 from .page import CropperError
 from .pipeline import analyze_pdf
 
@@ -54,6 +55,13 @@ def run_auto(pdfs: list[Path]) -> int:
 
         question_count = len({box.question for box in analysis.boxes})
         print(f"  {question_count} question image(s) written to {result.output_dir}")
+        if analysis.gaps:
+            missing = format_number_ranges(analysis.gaps)
+            print(
+                f"  warning: no question start found for {missing}; "
+                "run 'review' to add those boxes.",
+                file=sys.stderr,
+            )
     return 1 if failures else 0
 
 

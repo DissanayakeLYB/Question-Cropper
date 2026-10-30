@@ -74,13 +74,19 @@ def text_lines(page: pymupdf.Page, width: int, height: int) -> list[TextLine]:
     return lines
 
 
-def ocr_lines(image: Image.Image) -> list[TextLine]:
-    """OCR a page with Tesseract and return line boxes in image pixels."""
+# Page segmentation modes combined when reading a scanned page. "psm 3" (auto)
+# groups lines well but can drop an isolated question number at the page edge;
+# "psm 6" (uniform block) keeps those numbers. Merging both recovers them.
+OCR_PSMS = (3, 6)
+
+
+def _ocr_pass(image: Image.Image, psm: int) -> list[TextLine]:
+    """Run one Tesseract pass and return its line boxes in image pixels."""
     try:
         data = pytesseract.image_to_data(
             image.convert("L"),
             output_type=pytesseract.Output.DICT,
-            config="--psm 3",
+            config=f"--psm {psm}",
         )
     except pytesseract.TesseractNotFoundError as exc:
         raise CropperError(
@@ -136,6 +142,29 @@ def ocr_lines(image: Image.Image) -> list[TextLine]:
     ]
     lines.sort(key=lambda line: (line.y0, line.x0))
     return lines
+
+
+def ocr_lines(image: Image.Image) -> list[TextLine]:
+    """OCR a page with Tesseract and return the merged line boxes."""
+    lines: list[TextLine] = []
+    for psm in OCR_PSMS:
+        lines.extend(_ocr_pass(image, psm))
+    return _dedupe_lines(lines)
+
+
+def _dedupe_lines(lines: list[TextLine]) -> list[TextLine]:
+    """Drop the same line read twice by two OCR passes."""
+    unique: list[TextLine] = []
+    for line in sorted(lines, key=lambda item: (item.y0, item.x0)):
+        text = line.text.strip()
+        height = max(1.0, line.y1 - line.y0)
+        if any(
+            other.text.strip() == text and abs(other.y0 - line.y0) <= height * 0.5
+            for other in unique
+        ):
+            continue
+        unique.append(line)
+    return unique
 
 
 def make_thumbnail(image: Image.Image, target_width: int = 480) -> tuple[Image.Image, float]:

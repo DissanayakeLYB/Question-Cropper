@@ -154,6 +154,7 @@ def create_app(session: ReviewSession) -> FastAPI:
                     for page in analysis.pages
                 ],
                 "boxes": [box.to_dict() for box in analysis.boxes],
+                "gaps": analysis.gaps,
                 "files": paper.saved_files,
                 "manifest": "manifest.json" if paper.saved_manifest else None,
             }
@@ -198,6 +199,7 @@ def create_app(session: ReviewSession) -> FastAPI:
                 for page in analysis.pages
             ],
             "boxes": [box.to_dict() for box in analysis.boxes],
+            "gaps": analysis.gaps,
             "files": paper.saved_files,
             "manifest": "manifest.json" if paper.saved_manifest else None,
         }

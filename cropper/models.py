@@ -106,6 +106,7 @@ class PaperAnalysis:
     dpi: int
     pages: list[PageInfo]
     boxes: list[Box]
+    gaps: list[int] = field(default_factory=list)
 
     @property
     def stem(self) -> str:

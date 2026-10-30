@@ -586,3 +586,15 @@ button:focus-visible {
     padding: 14px 10px 50px;
   }
 }
+
+.detection-warning {
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  border: 1px solid #f5c2a8;
+  border-left: 4px solid var(--orange);
+  border-radius: 8px;
+  background: #fff6f1;
+  color: #7a2e0e;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
