@@ -10,8 +10,9 @@ from PIL import Image
 
 from . import DPI, JOIN_GAP, PADDING
 from .detect import Segment
+from .edges import PageInk, trim_to_ink
 from .models import Box, PageInfo
-from .page import ink_bbox, open_pdf, render_page
+from .page import open_pdf, render_page
 
 
 @dataclass
@@ -26,29 +27,11 @@ def trim_segment(
     segment: Segment,
     page: PageInfo,
     padding: int = PADDING,
+    ink: PageInk | None = None,
 ) -> Box | None:
-    """Trim a raw segment to its ink, expand by padding, and clamp to the column."""
-    if not 0 <= segment.column < len(page.columns):
-        return None
-    x0 = max(0, int(round(segment.x0)))
-    y0 = max(0, int(round(segment.y0)))
-    x1 = min(page.width, int(round(segment.x1)))
-    y1 = min(page.height, int(round(segment.y1)))
-    if x1 - x0 <= 1 or y1 - y0 <= 1:
-        return None
-
-    bbox = ink_bbox(page_image.crop((x0, y0, x1, y1)))
-    if bbox is None:
-        return None
-
-    column = page.columns[segment.column]
-    left = max(x0 + bbox[0] - padding, int(round(column.x0)), 0)
-    top = max(y0 + bbox[1] - padding, int(round(page.content_top)), 0)
-    right = min(x0 + bbox[2] + padding, int(round(column.x1)), page.width)
-    bottom = min(y0 + bbox[3] + padding, int(round(page.content_bottom)), page.height)
-    if right - left <= 1 or bottom - top <= 1:
-        return None
-    return Box(question=segment.question, page=page.number, x0=left, y0=top, x1=right, y1=bottom)
+    """Trim a raw segment to its ink, keeping every edge on a blank row."""
+    profile = ink if ink is not None else PageInk(page_image)
+    return trim_to_ink(profile, segment, page, padding)
 
 
 def join_crops(crops: list[Image.Image], gap: int = JOIN_GAP) -> Image.Image:

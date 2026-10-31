@@ -20,6 +20,14 @@ _PAGE_NUMBER_RES = (
     re.compile(r"^[ivxlcdm]{1,7}$", re.IGNORECASE),
 )
 
+# "[See page two]" and similar notes point at a continuation; they are printed
+# below the question block and must not end up inside the last crop.
+_FOOTER_NOTE_RE = re.compile(r"^[\[\s]*see\s+(?:the\s+)?page\b", re.IGNORECASE)
+
+# A band shorter than a line of text plus the padding above and below it has
+# nothing left of the question in it, so the question stays where it started.
+MIN_SEGMENT_HEIGHT = 40
+
 HEADER_ZONE = 0.16
 FOOTER_ZONE = 0.84
 COLUMN_INK_LIMIT = 0.004
@@ -50,11 +58,39 @@ def _normalise(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"\d+", "#", text.lower())).strip()
 
 
+def _is_footer_note(text: str) -> bool:
+    return bool(_FOOTER_NOTE_RE.match(text.strip()))
+
+
 def _is_page_number(text: str) -> bool:
     stripped = text.strip()
     if not stripped or len(stripped) > 24:
         return False
     return any(pattern.match(stripped) for pattern in _PAGE_NUMBER_RES)
+
+
+def _gap_above(page: PageInfo, y: float, minimum: float) -> bool:
+    """True when the blank strip above ``y`` is clear on the page thumbnail.
+
+    A footer or a page number stands apart from the text above it. A stray glyph
+    that OCR caught inside the body of a question does not, and must not be
+    mistaken for a footer and cut the question short.
+    """
+    scale = page.thumb_scale
+    thumb = page.thumb
+    if scale <= 0 or thumb is None:
+        return True
+    width, height = thumb.size
+    if width <= 0 or height <= 0:
+        return True
+    threshold = ink_threshold(thumb)
+    data = thumb.point(lambda value: 255 if value < threshold else 0).tobytes()
+    stop = min(height, max(0, int(y * scale)))
+    start = max(0, min(stop, int((y - minimum) * scale)))
+    for row in range(start, stop):
+        if data[row * width : (row + 1) * width].count(255) >= 3:
+            return False
+    return True
 
 
 def detect_margins(pages: list[PageInfo]) -> None:
@@ -106,8 +142,10 @@ def detect_margins(pages: list[PageInfo]) -> None:
             if line.y0 >= footer_limit
             and (
                 _is_page_number(line.text)
+                or _is_footer_note(line.text)
                 or len(footer_pages.get(_normalise(line.text), ())) >= repeat_min
             )
+            and _gap_above(page, line.y0, 2 * margin)
         ]
         if footer_tops:
             page.content_bottom = max(min(footer_tops) - margin, footer_limit)
@@ -395,7 +433,7 @@ def _segments_between(
         column = page.columns[column_index]
         y0 = max(y0, page.content_top)
         y1 = min(y1, page.content_bottom)
-        if y1 - y0 <= 1:
+        if y1 - y0 < MIN_SEGMENT_HEIGHT:
             return
         segments.append(
             Segment(
