@@ -7,8 +7,8 @@ from PIL import Image, ImageDraw
 
 from cropper import PADDING
 from cropper.detect import QuestionStart, build_segments
-from cropper.edges import PageInk, resolve_overlaps, trim_to_ink
-from cropper.models import Column, PageInfo
+from cropper.edges import PageInk, resolve_overlaps, snap_rows, trim_to_ink
+from cropper.models import Box, Column, PageInfo
 from cropper.page import open_pdf, render_page
 from cropper.pipeline import analyze_pdf
 from tests.helpers import make_single_column_pdf
@@ -107,6 +107,21 @@ class EdgeTests(unittest.TestCase):
                     row_has_ink(self.mask, box, edge),
                     f"Q{box.question}: edge at row {edge} cuts through text",
                 )
+
+    def test_snap_moves_an_edge_that_cuts_a_line(self) -> None:
+        # The top edge starts inside the first question's opening line.
+        box = Box(1, 1, TEXT_LEFT, 185, TEXT_LEFT + 500, 250)
+        top, bottom = snap_rows(self.ink, box.x0, box.y0, box.x1, box.y1)
+
+        self.assertTrue(self.ink.row_is_blank(top, box.x0, box.x1))
+        self.assertTrue(self.ink.row_is_blank(bottom, box.x0, box.x1))
+        self.assertLessEqual(top, 180)
+        self.assertGreaterEqual(bottom, 193)
+        self.assertGreaterEqual(bottom - top, 20)
+
+    def test_snap_leaves_a_box_that_already_sits_on_blank_rows(self) -> None:
+        box = Box(1, 1, TEXT_LEFT, 170, TEXT_LEFT + 500, 265)
+        self.assertEqual(snap_rows(self.ink, box.x0, box.y0, box.x1, box.y1), (170, 265))
 
     def test_no_text_line_is_cut(self) -> None:
         for box in self.boxes:

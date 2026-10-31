@@ -25,6 +25,12 @@ const els = {
   nextPage: document.getElementById("next-page"),
   addBox: document.getElementById("add-box"),
   deleteBox: document.getElementById("delete-box"),
+  snapToggle: document.getElementById("snap-toggle"),
+  reviewPanel: document.getElementById("review-panel"),
+  reviewCount: document.getElementById("review-count"),
+  reviewList: document.getElementById("review-list"),
+  reviewEmpty: document.getElementById("review-empty"),
+  nextFlagged: document.getElementById("next-flagged"),
   questionInput: document.getElementById("question-input"),
   saveButton: document.getElementById("save-button"),
   saveStatus: document.getElementById("save-status"),
@@ -43,7 +49,10 @@ let active = null;
 let busy = false;
 let saving = false;
 let adding = false;
+let addingQuestion = null;
 let toastTimer = null;
+// Hand-dragged edges jump to the nearest blank row while this is on.
+let snapToText = true;
 
 function clamp(value, minimum, maximum) {
   return Math.min(Math.max(value, minimum), maximum);
@@ -219,6 +228,7 @@ function applyBoxRect(element, box, page) {
 function renderBoxes() {
   els.overlay.innerHTML = "";
   renderSummary(active);
+  renderReviewList();
   if (!active) {
     updateSelectionUi();
     return;
@@ -290,6 +300,9 @@ function updateSelectionUi() {
   } else {
     els.questionInput.value = "";
   }
+  for (const item of els.reviewList.querySelectorAll(".review-item")) {
+    item.classList.toggle("active", !!box && Number(item.dataset.id) === box.id);
+  }
 }
 
 function updateControls() {
@@ -305,13 +318,15 @@ function updateControls() {
   els.saveButton.disabled = !active || busy || saving || active.boxes.length === 0;
   els.saveButton.textContent = saving ? "Saving…" : "Save PNGs";
   els.hint.textContent = adding
-    ? "Drag on the page to draw a new box. Click Add box again to cancel."
-    : "Click a box to select it. Drag to move, drag a handle to resize.";
+    ? `Drag on the page to draw Q${addingQuestion ?? "?"}. Click Add box again to cancel.`
+    : "Click a box to select it. Drag to move, drag a handle to resize. Shortcuts: ← → pages, Delete removes.";
   updateSelectionUi();
 }
 
 function setAdding(value) {
   adding = value;
+  // A new box fills the first number the paper is missing.
+  addingQuestion = adding && active ? nextQuestionNumber() : null;
   els.overlay.classList.toggle("adding", adding);
   updateControls();
 }
@@ -349,7 +364,13 @@ function renderSummary(state) {
   }
   const expected = state.data.expected || expectedValue();
   const covered = new Set(active.boxes.map((box) => box.question));
-  const missing = (state.data.gaps || []).filter((number) => !covered.has(number));
+  // Count from the boxes on the page, so adding or deleting one shows up.
+  const missing = [];
+  for (let number = 1; number <= expected; number += 1) {
+    if (!covered.has(number)) {
+      missing.push(number);
+    }
+  }
   const found = Math.max(0, expected - missing.length);
   const flagged = active.boxes.filter((box) => (box.review || []).length > 0).length;
   const parts = [
@@ -459,7 +480,133 @@ async function uploadFile(file) {
 }
 
 function nextQuestionNumber() {
-  return active.boxes.reduce((maximum, box) => Math.max(maximum, box.question), 0) + 1;
+  // The first number the paper is missing, not one past the largest, so a new
+  // box fills a hole instead of extending the run.
+  const used = new Set(active.boxes.map((box) => box.question));
+  const expected = active.data.expected || expectedValue();
+  for (let number = 1; number <= expected; number += 1) {
+    if (!used.has(number)) {
+      return number;
+    }
+  }
+  return Math.max(0, ...used) + 1;
+}
+
+function flaggedBoxes() {
+  if (!active) {
+    return [];
+  }
+  return active.boxes
+    .filter((box) => (box.review || []).length > 0)
+    .sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x);
+}
+
+function renderReviewList() {
+  if (!active) {
+    els.reviewPanel.classList.add("hidden");
+    return;
+  }
+  const flagged = flaggedBoxes();
+  els.reviewPanel.classList.remove("hidden");
+  els.reviewCount.textContent = String(flagged.length);
+  els.reviewCount.classList.toggle("zero", flagged.length === 0);
+  els.nextFlagged.disabled = flagged.length === 0;
+  els.reviewEmpty.classList.toggle("hidden", flagged.length > 0);
+  els.reviewList.replaceChildren();
+
+  for (const box of flagged) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `review-item${box.id === active.selectedId ? " active" : ""}`;
+    button.dataset.id = String(box.id);
+
+    const title = document.createElement("strong");
+    title.textContent = `Q${box.question} · page ${box.page}`;
+    const reasons = document.createElement("span");
+    reasons.textContent = box.review.join("; ");
+    button.append(title, reasons);
+    button.addEventListener("click", () => focusBox(box));
+    item.appendChild(button);
+    els.reviewList.appendChild(item);
+  }
+}
+
+function focusBox(box) {
+  if (!active || !box) {
+    return;
+  }
+  if (box.page !== active.page) {
+    showPage(box.page);
+  }
+  selectBox(box.id);
+  renderReviewList();
+  const element = els.overlay.querySelector(`.box[data-id="${box.id}"]`);
+  if (element) {
+    element.scrollIntoView({ block: "center", inline: "nearest" });
+    element.classList.add("flash");
+    window.setTimeout(() => element.classList.remove("flash"), 900);
+  }
+}
+
+function nextFlagged() {
+  if (!active) {
+    return;
+  }
+  const flagged = flaggedBoxes();
+  if (!flagged.length) {
+    toast("No box needs review.");
+    return;
+  }
+  const current = selectedBox();
+  if (!current) {
+    focusBox(flagged[0]);
+    return;
+  }
+  const here = flagged.findIndex((box) => box.id === current.id);
+  if (here >= 0) {
+    focusBox(flagged[(here + 1) % flagged.length]);
+    return;
+  }
+  const next = flagged.find(
+    (box) => box.page > current.page || (box.page === current.page && box.y > current.y)
+  );
+  focusBox(next || flagged[0]);
+}
+
+async function snapBox(box, element) {
+  if (!active || !box || !snapToText) {
+    return;
+  }
+  const page = active.data.pages[box.page - 1];
+  box.snapToken = (box.snapToken || 0) + 1;
+  const token = box.snapToken;
+  try {
+    const snapped = await api(`/api/papers/${active.data.id}/snap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        page: box.page,
+        x: clamp(Math.round(box.x), 0, page.width - 2),
+        y: clamp(Math.round(box.y), 0, page.height - 2),
+        w: Math.max(2, Math.round(box.w)),
+        h: Math.max(2, Math.round(box.h)),
+      }),
+    });
+    if (!active || box.snapToken !== token || box.page !== active.page) {
+      return;
+    }
+    box.x = snapped.x;
+    box.y = snapped.y;
+    box.w = snapped.w;
+    box.h = snapped.h;
+    const node = element || els.overlay.querySelector(`.box[data-id="${box.id}"]`);
+    if (node) {
+      applyBoxRect(node, box, page);
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
 }
 
 function clearSaveStatus() {
@@ -486,6 +633,7 @@ function clearReview(box, element) {
   }
   // The reader has just moved the edges by hand, so the old reasons are stale.
   box.review = [];
+  renderReviewList();
   const node = element || els.overlay.querySelector(`.box[data-id="${box.id}"]`);
   if (node) {
     node.classList.remove("flagged");
@@ -521,6 +669,7 @@ function startMove(event, box, element, page) {
     clearReview(box, element);
     clearSaveStatus();
     updateSelectionUi();
+    snapBox(box, element);
   }
 
   window.addEventListener("pointermove", move);
@@ -583,6 +732,7 @@ function startResize(event, box, direction, element) {
     clearReview(box, element);
     clearSaveStatus();
     updateSelectionUi();
+    snapBox(box, element);
   }
 
   window.addEventListener("pointermove", move);
@@ -661,7 +811,7 @@ function onOverlayPointerDown(event) {
 
     const box = {
       id: active.nextId++,
-      question: nextQuestionNumber(),
+      question: addingQuestion ?? nextQuestionNumber(),
       page: active.page,
       x,
       y,
@@ -824,6 +974,12 @@ function bindEvents() {
     setAdding(!adding);
   });
   els.deleteBox.addEventListener("click", deleteSelected);
+  els.nextFlagged.addEventListener("click", nextFlagged);
+  els.snapToggle.addEventListener("click", () => {
+    snapToText = !snapToText;
+    els.snapToggle.setAttribute("aria-pressed", snapToText ? "true" : "false");
+    toast(snapToText ? "Snap to text is on." : "Snap to text is off.");
+  });
   els.questionInput.addEventListener("input", onQuestionInput);
   els.questionInput.addEventListener("change", onQuestionChange);
   els.saveButton.addEventListener("click", saveAll);
@@ -833,11 +989,19 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Delete" && event.key !== "Backspace") {
-      return;
-    }
     const tag = document.activeElement ? document.activeElement.tagName : "";
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+      return;
+    }
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      if (!active || busy || saving) {
+        return;
+      }
+      event.preventDefault();
+      showPage(active.page + (event.key === "ArrowRight" ? 1 : -1));
+      return;
+    }
+    if (event.key !== "Delete" && event.key !== "Backspace") {
       return;
     }
     if (!selectedBox()) {

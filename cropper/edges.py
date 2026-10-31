@@ -416,6 +416,42 @@ def trim_to_ink(
     )
 
 
+# Edges moved by hand are snapped to the nearest blank row within this reach.
+SNAP_RADIUS = 80
+
+def _nearest_blank(ink: PageInk, x0: int, x1: int, y: int, low: int, high: int) -> int:
+    """The blank row closest to ``y``, searched outward and kept within bounds."""
+    if low > high:
+        return y
+    if ink.row_is_blank(y, x0, x1):
+        return y
+    for offset in range(1, SNAP_RADIUS + 1):
+        for candidate in (y - offset, y + offset):
+            if low <= candidate <= high and ink.row_is_blank(candidate, x0, x1):
+                return candidate
+    return y
+
+
+def snap_rows(
+    ink: PageInk, x0: int, y0: int, x1: int, y1: int, min_height: int = 20
+) -> tuple[int, int]:
+    """Move a box's top and bottom edges onto the nearest blank rows.
+
+    A hand-dragged edge lands wherever the pointer was, often a few pixels into
+    a line of text. Both edges are pushed to the nearest row with no ink, and
+    the box is kept at least ``min_height`` tall.
+    """
+    left = max(0, min(x0, ink.width - 1))
+    right = max(left + 1, min(x1, ink.width))
+    top = max(0, min(y0, ink.height - 1))
+    bottom = max(top + 1, min(y1, ink.height))
+    snapped_top = _nearest_blank(ink, left, right, top, 0, bottom - min_height)
+    snapped_bottom = _nearest_blank(
+        ink, left, right, bottom, snapped_top + min_height, ink.height
+    )
+    return snapped_top, max(snapped_bottom, snapped_top + min_height)
+
+
 def resolve_overlaps(boxes: list[Box], inks: dict[int, PageInk]) -> list[Box]:
     """Keep boxes on one page from overlapping.
 

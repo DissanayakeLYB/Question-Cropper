@@ -38,10 +38,11 @@
       <span class="divider"></span>
       <button id="add-box" class="btn" type="button">+ Add box</button>
       <button id="delete-box" class="btn danger" type="button" disabled>Delete box</button>
+      <button id="snap-toggle" class="btn toggle" type="button" aria-pressed="true" title="Move a dragged edge onto the nearest blank row">Snap to text</button>
       <label class="field question-field">Question
         <input id="question-input" type="number" min="1" step="1" disabled>
       </label>
-      <span id="hint" class="hint">Click a box to select it. Drag to move, drag a handle to resize.</span>
+      <span id="hint" class="hint">Click a box to select it. Drag to move, drag a handle to resize. Shortcuts: ← → pages, Delete removes.</span>
       <span id="save-status" class="save-status"></span>
       <span id="detection-summary" class="detection-summary" role="status"></span>
     </div>
@@ -66,15 +67,26 @@
         </div>
         <div id="result-grid" class="result-grid"></div>
       </section>
-      <div id="stage-shell">
-      <div id="stage">
-        <img id="page-image" alt="PDF page">
-        <div id="overlay"></div>
-        <div id="loading" class="loading hidden">
-          <div class="spinner"></div>
-          <span id="loading-text">Reading PDF…</span>
+      <div id="editor" class="editor">
+        <div id="stage-shell">
+        <div id="stage">
+          <img id="page-image" alt="PDF page">
+          <div id="overlay"></div>
+          <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <span id="loading-text">Reading PDF…</span>
+          </div>
         </div>
-      </div>
+        </div>
+        <aside id="review-panel" class="review-panel hidden" aria-labelledby="review-title">
+          <div class="review-head">
+            <h2 id="review-title">Needs review</h2>
+            <span id="review-count" class="review-count">0</span>
+          </div>
+          <button id="next-flagged" class="btn" type="button">Next flagged →</button>
+          <ul id="review-list" class="review-list"></ul>
+          <p id="review-empty" class="review-empty">Nothing to review.</p>
+        </aside>
       </div>
     </section>
   </main>

@@ -181,6 +181,82 @@ class UploadUiTests(unittest.TestCase):
         self.assertIn('id="save-button" class="btn primary" type="button" disabled', page)
         self.assertIn('id="expected-input"', page)
         self.assertIn('id="detection-summary"', page)
+        # The review tools: flagged list with a count, next flagged, snap toggle.
+        self.assertIn('id="review-panel"', page)
+        self.assertIn('id="review-count"', page)
+        self.assertIn('id="review-list"', page)
+        self.assertIn('id="next-flagged"', page)
+        self.assertIn('id="snap-toggle"', page)
+
+    def test_snap_puts_a_dragged_edge_on_a_blank_row(self) -> None:
+        status, _, content = self.request(
+            "POST",
+            "/api/upload?filename=2019.pdf",
+            body=self.pdf_path.read_bytes(),
+            headers={"Content-Type": "application/pdf"},
+        )
+        self.assertEqual(status, 200, content.decode(errors="replace"))
+        paper_id = json.loads(content)["id"]
+
+        body = json.dumps({"page": 1, "x": 100, "y": 300, "w": 800, "h": 200}).encode()
+        snap_status, _, snap_body = self.request(
+            "POST",
+            f"/api/papers/{paper_id}/snap",
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(snap_status, 200, snap_body.decode(errors="replace"))
+        snapped = json.loads(snap_body)
+        self.assertEqual(snapped["x"], 100)
+        self.assertEqual(snapped["w"], 800)
+        self.assertGreaterEqual(snapped["h"], 20)
+
+        from cropper.edges import PageInk
+        from cropper.page import open_pdf, render_page
+
+        doc = open_pdf(self.pdf_path)
+        try:
+            ink = PageInk(render_page(doc[0], 200))
+        finally:
+            doc.close()
+        left, right = snapped["x"], snapped["x"] + snapped["w"]
+        self.assertTrue(
+            ink.row_is_blank(snapped["y"], left, right),
+            "top edge is still on a row with ink",
+        )
+        bottom_row = min(snapped["y"] + snapped["h"], ink.height - 1)
+        self.assertTrue(
+            ink.row_is_blank(bottom_row, left, right),
+            "bottom edge is still on a row with ink",
+        )
+
+        # Snapping an already snapped box changes nothing.
+        again_status, _, again_body = self.request(
+            "POST",
+            f"/api/papers/{paper_id}/snap",
+            body=json.dumps({**snapped, "page": 1}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(again_status, 200)
+        self.assertEqual(json.loads(again_body), snapped)
+
+    def test_snap_rejects_an_unknown_page(self) -> None:
+        status, _, content = self.request(
+            "POST",
+            "/api/upload?filename=2019.pdf",
+            body=self.pdf_path.read_bytes(),
+            headers={"Content-Type": "application/pdf"},
+        )
+        self.assertEqual(status, 200, content.decode(errors="replace"))
+        paper_id = json.loads(content)["id"]
+        body = json.dumps({"page": 99, "x": 10, "y": 10, "w": 100, "h": 100}).encode()
+        snap_status, _, _ = self.request(
+            "POST",
+            f"/api/papers/{paper_id}/snap",
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(snap_status, 404)
 
 
 if __name__ == "__main__":

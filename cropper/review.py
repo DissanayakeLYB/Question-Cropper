@@ -14,9 +14,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from . import DPI
 from .crop import save_questions
+from .edges import PageInk, snap_rows
 from .models import Box, PaperAnalysis
-from .page import CropperError, open_pdf
+from .page import CropperError, open_pdf, render_page
 from .pipeline import analyze_pdf
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -40,6 +42,14 @@ class SavePayload(BaseModel):
     boxes: list[BoxPayload]
 
 
+class SnapPayload(BaseModel):
+    page: int
+    x: float
+    y: float
+    w: float
+    h: float
+
+
 class ReviewPaper:
     def __init__(
         self,
@@ -58,6 +68,9 @@ class ReviewPaper:
         self.saved_files: list[str] = []
         self.saved_manifest = False
         self._lock = threading.Lock()
+        # Rendered pages kept for snapping, newest last. A mask is a few
+        # megabytes, so only the last few pages are worth holding on to.
+        self._inks: dict[int, PageInk] = {}
         doc = open_pdf(path)
         try:
             self.page_count = doc.page_count
@@ -81,6 +94,21 @@ class ReviewPaper:
 
     def preview_path(self, page_number: int) -> Path:
         return self.preview_dir / f"{page_number:03d}.jpg"
+
+    def ink(self, page_number: int) -> PageInk:
+        """The page's ink profile, rendered once and reused while snapping."""
+        cached = self._inks.pop(page_number, None)
+        if cached is None:
+            dpi = self.analysis.dpi if self.analysis is not None else DPI
+            doc = open_pdf(self.path)
+            try:
+                cached = PageInk(render_page(doc[page_number - 1], dpi))
+            finally:
+                doc.close()
+        self._inks[page_number] = cached
+        while len(self._inks) > 3:
+            self._inks.pop(next(iter(self._inks)))
+        return cached
 
 
 class ReviewSession:
@@ -244,6 +272,22 @@ def create_app(session: ReviewSession) -> FastAPI:
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Page preview not found.")
         return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.post("/api/papers/{paper_id}/snap")
+    def snap(paper_id: int, payload: SnapPayload) -> dict:
+        """Move a box's top and bottom edges onto the nearest blank rows."""
+        paper = session.get(paper_id)
+        if not 1 <= payload.page <= paper.page_count:
+            raise HTTPException(status_code=404, detail="Unknown page.")
+        ink = paper.ink(payload.page)
+        x0 = int(round(payload.x))
+        x1 = x0 + int(round(payload.w))
+        y0 = int(round(payload.y))
+        y1 = y0 + int(round(payload.h))
+        if x1 - x0 < 2 or y1 - y0 < 2:
+            raise HTTPException(status_code=400, detail="Box is too small to snap.")
+        top, bottom = snap_rows(ink, x0, y0, x1, y1)
+        return {"x": x0, "y": top, "w": x1 - x0, "h": bottom - top}
 
     @app.post("/api/papers/{paper_id}/save")
     def save(paper_id: int, payload: SavePayload) -> dict:
