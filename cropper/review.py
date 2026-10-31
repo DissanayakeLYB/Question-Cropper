@@ -31,6 +31,9 @@ class BoxPayload(BaseModel):
     w: float
     h: float
     question: int = Field(ge=1)
+    # Reasons the box was flagged on the page; kept so the manifest can record
+    # them even when the boxes come from the review page rather than detection.
+    review: list[str] = Field(default_factory=list)
 
 
 class SavePayload(BaseModel):
@@ -272,7 +275,7 @@ def create_app(session: ReviewSession) -> FastAPI:
                 raise HTTPException(
                     status_code=400, detail=f"Question {item.question}: box is too small."
                 )
-            boxes.append(Box(item.question, item.page, x0, y0, x1, y1))
+            boxes.append(Box(item.question, item.page, x0, y0, x1, y1, list(item.review)))
 
         try:
             result = save_questions(paper.path, boxes, output_root=OUTPUT_ROOT)

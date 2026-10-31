@@ -57,11 +57,13 @@ In review, click a box to select it, drag it to move it, or drag a handle to res
 
 ## Output
 
-Each PDF writes to `output/<pdf name>/`, with one PNG per question named like `2019_q01.png` plus a `manifest.json`. The manifest records each question's number, file, and boxes, which are `[left, top, right, bottom]` in pixels at 200 DPI, along with every page segment stacked into the image.
+Each PDF writes to `output/<pdf name>/`, with one PNG per question named like `2019_q01.png` plus a `manifest.json`. The manifest records each question's number, file, and boxes, which are `[left, top, right, bottom]` in pixels at 200 DPI, along with every page segment stacked into the image and any reasons the box needs review.
 
 ## How it works
 
 Pages are rendered at 200 DPI, and question starts are found where the PDF text layer, the OCR text and the column geometry agree. Scanned pages are read twice with two different page-segmentation modes and the results are combined, because a single pass can silently drop a question number next to the page edge. A number is only accepted when it sits on the same left edge as the other question numbers in its column, which rejects numbers inside body text. Missing numbers are then searched between their neighbours: first in the extracted text, then with a 300 DPI OCR pass over the left margin at a lower confidence threshold, and finally as a blank gap between text blocks. Headers, footers, and page numbers are excluded, and a detected central gutter selects one- or two-column reading order. Each crop runs from one question number to the next. Its edges are snapped to the page's horizontal ink profile, which marks a row blank only when it has no dark pixel: the top edge sits in the blank gap above the question number, the bottom edge in the blank gap below the question's last line, and an edge is never left on a row with ink. Boxes on a page cannot overlap, because each bottom edge is kept above the next top edge, and a tight gap is split down its middle. The page frame, the page header and footer notes such as "[See page two]" are kept out of the crop, the remaining white space is trimmed and 10 px of padding is kept. A question that continues onto the next page is still joined into a single image.
+
+Every box is then checked. A box that still holds a second question number is split at that number and both halves are trimmed again, so the question that was swallowed gets its own image. Boxes are marked **needs review** when they are more than twice the median box height, when ink touches their top or bottom edge, when they overlap another box, or when their number breaks the paper's numbering. Flagged boxes are dashed amber on the review page, the top bar shows how many need a check, the CLI lists their numbers, and `manifest.json` records the reasons.
 
 ## Tests
 

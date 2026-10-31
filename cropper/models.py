@@ -65,6 +65,8 @@ class Box:
     y0: int
     x1: int
     y1: int
+    # Filled by the self-check: the reasons this box needs a human look.
+    review: list[str] = field(default_factory=list)
 
     @property
     def width(self) -> int:
@@ -74,6 +76,10 @@ class Box:
     def height(self) -> int:
         return self.y1 - self.y0
 
+    @property
+    def needs_review(self) -> bool:
+        return bool(self.review)
+
     def to_dict(self) -> dict:
         return {
             "question": self.question,
@@ -82,6 +88,7 @@ class Box:
             "y": self.y0,
             "w": self.width,
             "h": self.height,
+            "review": list(self.review),
         }
 
     @classmethod

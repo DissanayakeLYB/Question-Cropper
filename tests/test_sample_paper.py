@@ -106,6 +106,37 @@ class SamplePaperTests(unittest.TestCase):
                     f"Q{second.question} on page {page_number}",
                 )
 
+    def test_self_check_flags_only_known_reasons(self) -> None:
+        allowed = (
+            "more than twice the median height",
+            "ink touches the top edge",
+            "ink touches the bottom edge",
+            "overlaps another box",
+            "contains a second question number",
+            "is missing before it",
+            "is outside",
+        )
+        for box in self.analysis.boxes:
+            for reason in box.review:
+                self.assertTrue(
+                    any(reason.startswith(prefix) for prefix in allowed),
+                    f"Q{box.question} has an unknown review reason: {reason!r}",
+                )
+
+    def test_no_box_needs_a_split_or_has_an_overlap(self) -> None:
+        """The two detection failures this paper used to show are gone."""
+        for box in self.analysis.boxes:
+            self.assertNotIn(
+                "contains a second question number",
+                " ".join(box.review),
+                f"Q{box.question} still holds another question number",
+            )
+            self.assertNotIn(
+                "overlaps another box",
+                " ".join(box.review),
+                f"Q{box.question} overlaps another box",
+            )
+
     def test_no_crop_includes_the_page_frame(self) -> None:
         for box in self.analysis.boxes:
             ink = self.inks[box.page]

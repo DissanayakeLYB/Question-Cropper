@@ -107,6 +107,7 @@ function makeState(data) {
     y: box.y,
     w: box.w,
     h: box.h,
+    review: box.review || [],
   }));
   return {
     data,
@@ -226,13 +227,17 @@ function renderBoxes() {
   const page = currentPage();
   for (const box of active.boxes.filter((item) => item.page === active.page)) {
     const element = document.createElement("div");
-    element.className = `box${box.id === active.selectedId ? " selected" : ""}`;
+    const flagged = (box.review || []).length > 0;
+    element.className = `box${box.id === active.selectedId ? " selected" : ""}${
+      flagged ? " flagged" : ""
+    }`;
     element.dataset.id = String(box.id);
+    element.title = flagged ? box.review.join("\n") : "";
     applyBoxRect(element, box, page);
 
     const label = document.createElement("span");
     label.className = "box-label";
-    label.textContent = `Q${box.question}`;
+    label.textContent = flagged ? `Q${box.question} !` : `Q${box.question}`;
     element.appendChild(label);
 
     for (const direction of HANDLE_DIRECTIONS) {
@@ -339,17 +344,25 @@ function expectedValue() {
 function renderSummary(state) {
   if (!active) {
     els.detectionSummary.textContent = "";
-    els.detectionSummary.classList.remove("has-gaps");
+    els.detectionSummary.classList.remove("has-gaps", "has-review");
     return;
   }
   const expected = state.data.expected || expectedValue();
   const covered = new Set(active.boxes.map((box) => box.question));
   const missing = (state.data.gaps || []).filter((number) => !covered.has(number));
   const found = Math.max(0, expected - missing.length);
-  els.detectionSummary.textContent = missing.length
-    ? `Found ${found} of ${expected} · missing ${formatRanges(missing)}`
-    : `Found ${found} of ${expected}`;
+  const flagged = active.boxes.filter((box) => (box.review || []).length > 0).length;
+  const parts = [
+    missing.length
+      ? `Found ${found} of ${expected} · missing ${formatRanges(missing)}`
+      : `Found ${found} of ${expected}`,
+  ];
+  if (flagged) {
+    parts.push(`${flagged} to check`);
+  }
+  els.detectionSummary.textContent = parts.join(" · ");
   els.detectionSummary.classList.toggle("has-gaps", missing.length > 0);
+  els.detectionSummary.classList.toggle("has-review", flagged > 0);
 }
 
 function renderResults() {
@@ -467,6 +480,24 @@ function toPageCoords(event) {
   };
 }
 
+function clearReview(box, element) {
+  if (!box || !(box.review || []).length) {
+    return;
+  }
+  // The reader has just moved the edges by hand, so the old reasons are stale.
+  box.review = [];
+  const node = element || els.overlay.querySelector(`.box[data-id="${box.id}"]`);
+  if (node) {
+    node.classList.remove("flagged");
+    node.title = "";
+    const label = node.querySelector(".box-label");
+    if (label) {
+      label.textContent = `Q${box.question}`;
+    }
+  }
+  renderSummary(active);
+}
+
 function startMove(event, box, element, page) {
   const start = toPageCoords(event);
   const original = { x: box.x, y: box.y };
@@ -487,6 +518,7 @@ function startMove(event, box, element, page) {
     box.w = Math.round(box.w);
     box.h = Math.round(box.h);
     applyBoxRect(element, box, page);
+    clearReview(box, element);
     clearSaveStatus();
     updateSelectionUi();
   }
@@ -548,6 +580,7 @@ function startResize(event, box, direction, element) {
     box.w = Math.round(box.w);
     box.h = Math.round(box.h);
     applyBoxRect(element, box, page);
+    clearReview(box, element);
     clearSaveStatus();
     updateSelectionUi();
   }
@@ -710,6 +743,7 @@ function serializeBox(box) {
     w: x1 - x0,
     h: y1 - y0,
     question: Math.max(1, Math.round(box.question)),
+    review: box.review || [],
   };
 }
 

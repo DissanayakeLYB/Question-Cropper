@@ -11,6 +11,7 @@ from .detect import build_segments, detect_columns, detect_margins, find_questio
 from .edges import PageInk, resolve_overlaps
 from .models import Box, PageInfo, PaperAnalysis
 from .repair import rescue_missing_starts
+from .selfcheck import review_flags, split_swallowed_questions
 from .page import (
     has_text_layer,
     make_thumbnail,
@@ -85,9 +86,14 @@ def analyze_pdf(
                     boxes.append(box)
 
         boxes = resolve_overlaps(boxes, inks)
+        # A box that still holds the next question number is cut in two, and
+        # both halves get their edges placed again.
+        boxes = split_swallowed_questions(boxes, pages, inks)
+        boxes = resolve_overlaps(boxes, inks)
         # A sliver left over at a segment boundary is not a question crop.
         boxes = [box for box in boxes if box.width >= 20 and box.height >= 10]
         boxes.sort(key=lambda box: (box.question, box.page, box.y0, box.x0))
+        review_flags(boxes, pages, inks, expected_count)
         # Report gaps from the images that were actually produced, so "found N
         # of M" can never claim a question whose crop came out empty.
         found = {box.question for box in boxes}

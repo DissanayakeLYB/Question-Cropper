@@ -411,6 +411,17 @@ button:focus-visible {
   box-shadow: 0 0 0 1px rgba(234, 88, 12, 0.12);
 }
 
+/* A box the self-check asked a reader to look at. */
+.box.flagged {
+  border-style: dashed;
+  border-color: #b45309;
+  background: rgba(180, 83, 9, 0.07);
+}
+
+.box.flagged .box-label {
+  background: #b45309;
+}
+
 .box-label {
   position: absolute;
   top: 2px;
@@ -601,6 +612,11 @@ button:focus-visible {
 .detection-summary.has-gaps {
   background: #fff1e8;
   color: #9a3412;
+}
+
+.detection-summary.has-review {
+  background: #fef3c7;
+  color: #78350f;
 }
 
 .expected-field input {

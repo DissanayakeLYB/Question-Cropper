@@ -62,6 +62,13 @@ def run_auto(pdfs: list[Path], expected_count: int = 50) -> int:
                 "run 'review' to add those boxes.",
                 file=sys.stderr,
             )
+        flagged = sorted({box.question for box in analysis.boxes if box.needs_review})
+        if flagged:
+            print(
+                f"  review: Q{format_number_ranges(flagged)} need a check; "
+                "run 'review' to inspect them.",
+                file=sys.stderr,
+            )
     return 1 if failures else 0
 
 

@@ -80,9 +80,20 @@ class SaveTests(unittest.TestCase):
         self.assertEqual(second["page"], 1)
         self.assertEqual(second["box"], [120, 250, 700, 500])
         self.assertEqual(second["segments"], [
-            {"page": 1, "box": [120, 250, 700, 500]},
-            {"page": 2, "box": [120, 100, 700, 300]},
+            {"page": 1, "box": [120, 250, 700, 500], "review": []},
+            {"page": 2, "box": [120, 100, 700, 300], "review": []},
         ])
+        self.assertEqual(second["review"], [])
+
+    def test_manifest_records_why_a_box_needs_review(self) -> None:
+        box = Box(1, 1, 120, 200, 700, 500)
+        box.review = ["more than twice the median height (300 px against 100 px)"]
+        result = save_questions(self.pdf, [box], output_root=self.output)
+
+        manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+        question = manifest["questions"][0]
+        self.assertEqual(question["review"], box.review)
+        self.assertEqual(question["segments"][0]["review"], box.review)
 
     def test_resaving_removes_stale_question_images(self) -> None:
         save_questions(

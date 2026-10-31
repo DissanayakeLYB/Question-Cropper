@@ -103,6 +103,43 @@ class UploadUiTests(unittest.TestCase):
         self.assertTrue(content_type.startswith("image/png"))
         self.assertTrue(image_body.startswith(b"\x89PNG"))
 
+    def test_save_keeps_review_reasons_in_the_manifest(self) -> None:
+        status, _, content = self.request(
+            "POST",
+            "/api/upload?filename=2019.pdf",
+            body=self.pdf_path.read_bytes(),
+            headers={"Content-Type": "application/pdf"},
+        )
+        self.assertEqual(status, 200, content.decode(errors="replace"))
+        paper_id = json.loads(content)["id"]
+
+        reason = "more than twice the median height (300 px against 100 px)"
+        payload = {
+            "boxes": [
+                {
+                    "page": 1,
+                    "x": 100,
+                    "y": 100,
+                    "w": 600,
+                    "h": 300,
+                    "question": 1,
+                    "review": [reason],
+                }
+            ]
+        }
+        save_status, _, save_body = self.request(
+            "POST",
+            f"/api/papers/{paper_id}/save",
+            body=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(save_status, 200, save_body.decode(errors="replace"))
+
+        manifest = json.loads((self.output_dir / "2019" / "manifest.json").read_text(encoding="utf-8"))
+        question = manifest["questions"][0]
+        self.assertEqual(question["review"], [reason])
+        self.assertEqual(question["segments"][0]["review"], [reason])
+
     def test_upload_rejects_non_pdf_and_invalid_pdf(self) -> None:
         wrong_status, _, _ = self.request(
             "POST",

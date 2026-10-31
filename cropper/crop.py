@@ -127,7 +127,15 @@ def save_questions(
             image.save(destination, "PNG")
             files.append(destination)
 
-            segments = [{"page": box.page, "box": [box.x0, box.y0, box.x1, box.y1]} for box in ordered]
+            segments = [
+                {
+                    "page": box.page,
+                    "box": [box.x0, box.y0, box.x1, box.y1],
+                    "review": list(box.review),
+                }
+                for box in ordered
+            ]
+            review = sorted({reason for box in ordered for reason in box.review})
             manifest_questions.append(
                 {
                     "question": question,
@@ -135,6 +143,7 @@ def save_questions(
                     "page": segments[0]["page"],
                     "box": segments[0]["box"],
                     "segments": segments,
+                    "review": review,
                 }
             )
 
