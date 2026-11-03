@@ -385,3 +385,8 @@ def create_app(session: ReviewSession) -> FastAPI:
         return FileResponse(path, media_type=media_type)
 
     return app
+
+
+def create_default_app() -> FastAPI:
+    """Create an empty review app for ASGI servers such as Uvicorn."""
+    return create_app(ReviewSession([]))

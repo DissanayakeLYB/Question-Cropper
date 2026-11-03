@@ -57,6 +57,14 @@ In review, click a box to select it, drag it to move it, or drag a handle to res
 
 The review page also provides **Delete PDF**, which asks for confirmation before removing the selected PDF, its page renders, saved boxes, and generated PNGs. **Clear project** asks for confirmation before resetting the session to an empty state and removing all PDFs and outputs loaded during that session.
 
+For a server-style deployment, start an empty upload session with Uvicorn:
+
+```powershell
+uvicorn cropper.review:create_default_app --factory --host 0.0.0.0 --port 8000
+```
+
+Then open `http://localhost:8000`. Keep this local or behind authentication and HTTPS; the review server does not provide authentication.
+
 ## Output
 
 Each PDF writes to `output/<pdf name>/`, with one PNG per question named like `2019_q01.png` plus a `manifest.json`. The manifest records each question's number, file, and boxes, which are `[left, top, right, bottom]` in pixels at 200 DPI, along with every page segment stacked into the image and any reasons the box needs review.
