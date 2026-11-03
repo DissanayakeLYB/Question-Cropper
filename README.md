@@ -55,6 +55,8 @@ python -m cropper review papers/
 
 In review, click a box to select it, drag it to move it, or drag a handle to resize it. Good boxes are blue and boxes that need a look are red, listed under **Needs review** with a count; **Next flagged** jumps to the next one. **Snap to text** pushes a dragged edge onto the nearest blank row, **+ Add box** fills in the next missing question number, and **Save PNGs** writes the images and manifest. The keyboard shortcuts are `←` and `→` for the previous and next page, and `Delete` to remove the selected box. Boxes that share a question number are stacked into one PNG, so a question that continues onto another page can be joined by giving both boxes the same number.
 
+The review page also provides **Delete PDF**, which asks for confirmation before removing the selected PDF, its page renders, saved boxes, and generated PNGs. **Clear project** asks for confirmation before resetting the session to an empty state and removing all PDFs and outputs loaded during that session.
+
 ## Output
 
 Each PDF writes to `output/<pdf name>/`, with one PNG per question named like `2019_q01.png` plus a `manifest.json`. The manifest records each question's number, file, and boxes, which are `[left, top, right, bottom]` in pixels at 200 DPI, along with every page segment stacked into the image and any reasons the box needs review.

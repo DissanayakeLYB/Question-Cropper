@@ -7,6 +7,8 @@ const els = {
   paperSelect: document.getElementById("paper-select"),
   uploadInput: document.getElementById("upload-input"),
   uploadButton: document.getElementById("upload-button"),
+  deletePaper: document.getElementById("delete-paper"),
+  clearProject: document.getElementById("clear-project"),
   welcomeUpload: document.getElementById("welcome-upload"),
   welcome: document.getElementById("welcome"),
   paperWorkspace: document.getElementById("paper-workspace"),
@@ -310,6 +312,8 @@ function updateControls() {
   const locked = busy || saving;
   els.paperSelect.disabled = locked;
   els.uploadButton.disabled = locked;
+  els.deletePaper.disabled = !active || locked;
+  els.clearProject.disabled = locked;
   els.pageSelect.disabled = !active || locked;
   els.prevPage.disabled = !active || locked || active.page <= 1;
   els.nextPage.disabled = !active || locked || active.page >= total;
@@ -321,6 +325,40 @@ function updateControls() {
     ? `Drag on the page to draw Q${addingQuestion ?? "?"}. Click Add box again to cancel.`
     : "Click a box to select it. Drag to move, drag a handle to resize. Shortcuts: ← → pages, Delete removes.";
   updateSelectionUi();
+}
+
+function resetWorkspace() {
+  active = null;
+  paperStates.clear();
+  els.welcome.classList.remove("hidden");
+  els.paperWorkspace.classList.add("hidden");
+  els.toolbar.classList.add("hidden");
+  els.results.classList.add("hidden");
+  els.reviewPanel.classList.add("hidden");
+  els.paperSelect.replaceChildren();
+  els.pageSelect.replaceChildren();
+  els.pageTotal.textContent = "";
+  els.detectionSummary.textContent = "";
+  updateControls();
+}
+
+async function refreshPapers(selectedId = null) {
+  papers = await api("/api/papers");
+  els.paperSelect.replaceChildren();
+  for (const paper of papers) {
+    const option = document.createElement("option");
+    option.value = String(paper.id);
+    option.textContent = paper.name;
+    els.paperSelect.appendChild(option);
+  }
+  if (!papers.length) {
+    resetWorkspace();
+    return;
+  }
+  const paperId = papers.some((paper) => paper.id === selectedId)
+    ? selectedId
+    : papers[0].id;
+  await openPaper(paperId, expectedValue());
 }
 
 function setAdding(value) {
@@ -880,6 +918,53 @@ function deleteSelected() {
   updateControls();
 }
 
+async function deletePaper() {
+  if (!active || busy || saving) {
+    return;
+  }
+  const deletedName = active.data.name;
+  if (!window.confirm(`Delete "${deletedName}" and all of its renders, boxes, and PNGs?`)) {
+    return;
+  }
+  busy = true;
+  showLoading("Deleting PDF…");
+  updateControls();
+  try {
+    await api(`/api/papers/${active.data.id}`, { method: "DELETE" });
+    await refreshPapers();
+    toast(`Deleted ${deletedName}.`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    busy = false;
+    hideLoading();
+    updateControls();
+  }
+}
+
+async function clearProject() {
+  if (busy || saving) {
+    return;
+  }
+  if (!window.confirm("Clear the project and delete all PDFs, renders, boxes, and PNGs from this session?")) {
+    return;
+  }
+  busy = true;
+  showLoading("Clearing project…");
+  updateControls();
+  try {
+    await api("/api/clear", { method: "POST" });
+    await refreshPapers();
+    toast("Project cleared.");
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    busy = false;
+    hideLoading();
+    updateControls();
+  }
+}
+
 function serializeBox(box) {
   const page = active.data.pages[box.page - 1];
   const x0 = clamp(Math.round(box.x), 0, Math.max(0, page.width - 2));
@@ -933,6 +1018,8 @@ async function saveAll() {
 function bindEvents() {
   const openFilePicker = () => els.uploadInput.click();
   els.uploadButton.addEventListener("click", openFilePicker);
+  els.deletePaper.addEventListener("click", deletePaper);
+  els.clearProject.addEventListener("click", clearProject);
   els.welcomeUpload.addEventListener("click", openFilePicker);
   els.uploadInput.addEventListener("change", () => {
     const file = els.uploadInput.files && els.uploadInput.files[0];

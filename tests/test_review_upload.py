@@ -187,6 +187,49 @@ class UploadUiTests(unittest.TestCase):
         self.assertIn('id="review-list"', page)
         self.assertIn('id="next-flagged"', page)
         self.assertIn('id="snap-toggle"', page)
+        self.assertIn('id="delete-paper"', page)
+        self.assertIn('id="clear-project"', page)
+
+    def test_delete_paper_removes_review_files_and_outputs(self) -> None:
+        status, _, content = self.request(
+            "POST",
+            "/api/upload?filename=2019.pdf",
+            body=self.pdf_path.read_bytes(),
+            headers={"Content-Type": "application/pdf"},
+        )
+        self.assertEqual(status, 200, content.decode(errors="replace"))
+        paper_id = json.loads(content)["id"]
+        paper = self.session.papers[paper_id]
+        preview_dir = paper.preview_dir
+        upload_path = paper.path
+        output_dir = self.output_dir / "2019"
+        self.assertTrue(preview_dir.is_dir())
+        self.assertTrue(upload_path.is_file())
+        self.assertTrue(output_dir.is_dir())
+
+        delete_status, _, delete_body = self.request("DELETE", f"/api/papers/{paper_id}")
+        self.assertEqual(delete_status, 200, delete_body.decode(errors="replace"))
+        self.assertEqual(json.loads(delete_body)["papers"], [])
+        self.assertFalse(preview_dir.exists())
+        self.assertFalse(upload_path.exists())
+        self.assertFalse(output_dir.exists())
+
+    def test_clear_project_removes_all_papers_and_outputs(self) -> None:
+        for filename in ("first.pdf", "second.pdf"):
+            status, _, content = self.request(
+                "POST",
+                f"/api/upload?filename={filename}",
+                body=self.pdf_path.read_bytes(),
+                headers={"Content-Type": "application/pdf"},
+            )
+            self.assertEqual(status, 200, content.decode(errors="replace"))
+
+        clear_status, _, clear_body = self.request("POST", "/api/clear")
+        self.assertEqual(clear_status, 200, clear_body.decode(errors="replace"))
+        self.assertEqual(json.loads(clear_body)["papers"], [])
+        self.assertEqual(self.session.papers, [])
+        self.assertFalse((self.output_dir / "first").exists())
+        self.assertFalse((self.output_dir / "second").exists())
 
     def test_snap_puts_a_dragged_edge_on_a_blank_row(self) -> None:
         status, _, content = self.request(

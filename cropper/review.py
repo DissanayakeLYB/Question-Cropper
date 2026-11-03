@@ -110,6 +110,19 @@ class ReviewPaper:
             self._inks.pop(next(iter(self._inks)))
         return cached
 
+    def remove_files(self, output_root: Path) -> None:
+        """Remove this paper's review files and generated outputs."""
+        self._inks.clear()
+        shutil.rmtree(self.preview_dir, ignore_errors=True)
+        try:
+            self.path.relative_to(self.preview_dir.parent / "uploads")
+        except ValueError:
+            pass
+        else:
+            self.path.unlink(missing_ok=True)
+            shutil.rmtree(self.path.parent, ignore_errors=True)
+        shutil.rmtree(output_root / self.path.stem, ignore_errors=True)
+
 
 class ReviewSession:
     def __init__(self, pdfs: list[Path], expected_count: int = 50) -> None:
@@ -138,6 +151,18 @@ class ReviewSession:
         if not 0 <= paper_id < len(self.papers):
             raise HTTPException(status_code=404, detail="Unknown paper.")
         return self.papers[paper_id]
+
+    def remove(self, paper_id: int) -> None:
+        paper = self.get(paper_id)
+        paper.remove_files(OUTPUT_ROOT)
+        self.papers.pop(paper_id)
+        for index, remaining in enumerate(self.papers):
+            remaining.id = index
+
+    def clear(self) -> None:
+        for paper in self.papers:
+            paper.remove_files(OUTPUT_ROOT)
+        self.papers.clear()
 
     def cleanup(self) -> None:
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -226,6 +251,16 @@ def create_app(session: ReviewSession) -> FastAPI:
             {"id": paper.id, "name": paper.name, "page_count": paper.page_count}
             for paper in session.papers
         ]
+
+    @app.delete("/api/papers/{paper_id}")
+    def delete_paper(paper_id: int) -> dict:
+        session.remove(paper_id)
+        return {"papers": list_papers()}
+
+    @app.post("/api/clear")
+    def clear_project() -> dict:
+        session.clear()
+        return {"papers": []}
 
     @app.get("/api/papers/{paper_id}")
     def get_paper(paper_id: int, expected: int = Query(50, ge=1, le=200)) -> dict:
