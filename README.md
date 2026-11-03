@@ -25,6 +25,19 @@ For scanned papers, install Tesseract with English language data and make sure `
 - **macOS:** `brew install tesseract`
 - **Debian / Ubuntu:** `sudo apt install tesseract-ocr`
 
+On Windows, restart the terminal (and the review server) after installing Tesseract, then verify it:
+
+```powershell
+tesseract --version
+```
+
+If it is installed but not on `PATH`, point Question Cropper directly to it before starting Uvicorn:
+
+```powershell
+$env:TESSERACT_CMD = "C:\Program Files\Tesseract-OCR\tesseract.exe"
+uvicorn cropper.review:create_default_app --factory --host 0.0.0.0 --port 8000
+```
+
 ## Usage
 
 Crop a PDF, or every PDF directly inside a folder:

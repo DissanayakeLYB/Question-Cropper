@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import shutil
 
 import pymupdf
 import pytesseract
@@ -84,11 +86,35 @@ OCR_PSMS = (3, 6)
 MIN_OCR_CONFIDENCE = 30
 
 
+def _configure_tesseract() -> None:
+    """Find the native Tesseract executable used by pytesseract."""
+    configured = os.environ.get("TESSERACT_CMD")
+    candidates = [configured] if configured else []
+    candidates.extend(
+        [
+            shutil.which("tesseract"),
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        ]
+    )
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            pytesseract.pytesseract.tesseract_cmd = candidate
+            return
+    raise CropperError(
+        "This PDF has no text layer, so Tesseract OCR is required. "
+        "Install Tesseract OCR, then restart the app. On Windows, install it "
+        "from https://github.com/UB-Mannheim/tesseract/wiki or set the "
+        "TESSERACT_CMD environment variable to the full path of tesseract.exe."
+    )
+
+
 def _ocr_pass(
     image: Image.Image, psm: int, min_confidence: float = MIN_OCR_CONFIDENCE
 ) -> list[TextLine]:
     """Run one Tesseract pass and return its line boxes in image pixels."""
     try:
+        _configure_tesseract()
         data = pytesseract.image_to_data(
             image.convert("L"),
             output_type=pytesseract.Output.DICT,
@@ -96,8 +122,8 @@ def _ocr_pass(
         )
     except pytesseract.TesseractNotFoundError as exc:
         raise CropperError(
-            "This PDF has no text layer, so Tesseract OCR is required. "
-            "Install Tesseract and make sure the 'tesseract' command is on PATH."
+            "Tesseract OCR could not be started. Check the Tesseract installation "
+            "or set the TESSERACT_CMD environment variable to tesseract.exe."
         ) from exc
     except Exception as exc:
         raise CropperError(f"Tesseract OCR failed: {exc}") from exc
@@ -207,4 +233,3 @@ def ink_bbox(image: Image.Image) -> tuple[int, int, int, int] | None:
     threshold = ink_threshold(gray)
     mask = gray.point(lambda value: 255 if value < threshold else 0)
     return mask.getbbox()
-
