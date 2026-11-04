@@ -1,11 +1,11 @@
 # Question Cropper
 
-Crops each question out of a Sri Lankan A/L Physics past-paper PDF and saves it as a PNG. Cropping the rendered page keeps diagrams, graphs, and equations intact. A small local review page lets you fix boxes that automatic detection gets wrong.
+Extracts individual questions from Sri Lankan A/L Physics past-paper PDFs and saves them as PNG files. Use automatic detection for a quick result or the local review page to correct crop boundaries.
 
 ## Requirements
 
-- Python 3.11 or newer
-- Tesseract OCR, only for scanned PDFs with no text layer
+- Python 3.11+
+- Tesseract OCR for scanned PDFs without a text layer
 
 ## Setup
 
@@ -13,89 +13,57 @@ Crops each question out of a Sri Lankan A/L Physics past-paper PDF and saves it 
 python -m venv .venv
 ```
 
-Activate it with `.venv\Scripts\activate` on Windows or `source .venv/bin/activate` on macOS and Linux, then install the packages:
+Activate the environment (`.venv\Scripts\activate` on Windows or `source .venv/bin/activate` on macOS/Linux), then install the dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-For scanned papers, install Tesseract with English language data and make sure `tesseract` is on your `PATH`:
-
-- **Windows:** the [UB Mannheim build](https://github.com/UB-Mannheim/tesseract/wiki), or `scoop install tesseract`
-- **macOS:** `brew install tesseract`
-- **Debian / Ubuntu:** `sudo apt install tesseract-ocr`
-
-On Windows, restart the terminal (and the review server) after installing Tesseract, then verify it:
-
-```powershell
-tesseract --version
-```
-
-If it is installed but not on `PATH`, point Question Cropper directly to it before starting Uvicorn:
-
-```powershell
-$env:TESSERACT_CMD = "C:\Program Files\Tesseract-OCR\tesseract.exe"
-uvicorn cropper.review:create_default_app --factory --host 0.0.0.0 --port 8000
-```
+For scanned PDFs, install [Tesseract](https://github.com/tesseract-ocr/tesseract) and make sure `tesseract` is on your `PATH`.
 
 ## Usage
 
-Crop a PDF, or every PDF directly inside a folder:
+Crop one PDF or all PDFs in a folder automatically:
 
 ```bash
 python -m cropper auto paper.pdf
 python -m cropper auto papers/
 ```
 
-Papers are assumed to have 50 questions; pass the real count with `-n` (or `--expected`) for anything else:
+The default expected question count is 50. Change it with `-n`:
 
 ```bash
 python -m cropper auto paper.pdf -n 40
 ```
 
-Open the review page with no arguments to start from an upload, then pick a PDF (up to 100 MB):
+Open the review page:
 
 ```bash
 python -m cropper review
+python -m cropper review paper.pdf
 ```
 
-Or load an existing PDF or folder straight into it:
+The review page lets you move, resize, add, or remove boxes before saving PNGs. Use `←` and `→` to change pages and `Delete` to remove the selected box. Boxes with the same question number are combined, so questions spanning multiple pages can be joined.
+
+To run an upload-only server:
 
 ```bash
-python -m cropper review paper.pdf
-python -m cropper review papers/
-```
-
-In review, click a box to select it, drag it to move it, or drag a handle to resize it. Good boxes are blue and boxes that need a look are red, listed under **Needs review** with a count; **Next flagged** jumps to the next one. **Snap to text** pushes a dragged edge onto the nearest blank row, **+ Add box** fills in the next missing question number, and **Save PNGs** writes the images and manifest. The keyboard shortcuts are `←` and `→` for the previous and next page, and `Delete` to remove the selected box. Boxes that share a question number are stacked into one PNG, so a question that continues onto another page can be joined by giving both boxes the same number.
-
-The review page also provides **Delete PDF**, which asks for confirmation before removing the selected PDF, its page renders, saved boxes, and generated PNGs. **Clear project** asks for confirmation before resetting the session to an empty state and removing all PDFs and outputs loaded during that session.
-
-For a server-style deployment, start an empty upload session with Uvicorn:
-
-```powershell
 uvicorn cropper.review:create_default_app --factory --host 0.0.0.0 --port 8000
 ```
 
-Then open `http://localhost:8000`. Keep this local or behind authentication and HTTPS; the review server does not provide authentication.
+Then open `http://localhost:8000`. The server has no authentication; keep it local or put it behind authentication and HTTPS.
 
 ## Output
 
-Each PDF writes to `output/<pdf name>/`, with one PNG per question named like `2019_q01.png` plus a `manifest.json`. The manifest records each question's number, file, and boxes, which are `[left, top, right, bottom]` in pixels at 200 DPI, along with every page segment stacked into the image and any reasons the box needs review.
+Results are saved under `output/<pdf name>/`:
 
-## How it works
+- One PNG per question, such as `2019_q01.png`
+- `manifest.json` containing crop metadata and review warnings
 
-Pages are rendered at 200 DPI, and question starts are found where the PDF text layer, the OCR text and the column geometry agree. Scanned pages are read twice with two different page-segmentation modes and the results are combined, because a single pass can silently drop a question number next to the page edge. A number is only accepted when it sits on the same left edge as the other question numbers in its column, which rejects numbers inside body text. Missing numbers are then searched between their neighbours: first in the extracted text, then with a 300 DPI OCR pass over the left margin at a lower confidence threshold, and finally as a blank gap between text blocks. Headers, footers, and page numbers are excluded, and a detected central gutter selects one- or two-column reading order. Each crop runs from one question number to the next. Its edges are snapped to the page's horizontal ink profile, which marks a row blank only when it has no dark pixel: the top edge sits in the blank gap above the question number, the bottom edge in the blank gap below the question's last line, and an edge is never left on a row with ink. Boxes on a page cannot overlap, because each bottom edge is kept above the next top edge, and a tight gap is split down its middle. The page frame, the page header and footer notes such as "[See page two]" are kept out of the crop, the remaining white space is trimmed and 10 px of padding is kept. A question that continues onto the next page is still joined into a single image.
-
-Every box is then checked. A box that still holds a second question number is split at that number and both halves are trimmed again, so the question that was swallowed gets its own image. Boxes are marked **needs review** when they are more than twice the median box height, when ink touches their top or bottom edge, when they overlap another box, or when their number breaks the paper's numbering. Flagged boxes are dashed amber on the review page, the top bar shows how many need a check, the CLI lists their numbers, and `manifest.json` records the reasons.
+Automatic detection is heuristic, so review each new paper. Unusual layouts, poor scans, missing question numbers, and figures crossing columns may require manual corrections. Papers default to 50 questions unless another count is specified.
 
 ## Tests
 
 ```bash
 python -m unittest discover -v
 ```
-
-The tests generate their own PDFs; OCR tests are skipped when Tesseract is not installed.
-
-## Limitations
-
-Automatic detection is a heuristic, so check the review page for each new paper. OCR quality depends on the scan, a figure crossing the central gutter can be split, and unusual layouts or numbering may need manual boxes. When a question number cannot be found, the paper is assumed to have 50 questions unless you set the count; the review page shows how many were found and which numbers are missing so you can add those boxes yourself.
