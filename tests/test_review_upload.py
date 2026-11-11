@@ -1,3 +1,4 @@
+import io
 import json
 import socket
 import tempfile
@@ -6,6 +7,7 @@ import time
 import unittest
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
 import uvicorn
@@ -140,6 +142,82 @@ class UploadUiTests(unittest.TestCase):
         self.assertEqual(question["review"], [reason])
         self.assertEqual(question["segments"][0]["review"], [reason])
 
+    def test_save_recrops_from_the_posted_boxes_and_keeps_them(self) -> None:
+        status, _, content = self.request(
+            "POST",
+            "/api/upload?filename=2019.pdf",
+            body=self.pdf_path.read_bytes(),
+            headers={"Content-Type": "application/pdf"},
+        )
+        self.assertEqual(status, 200, content.decode(errors="replace"))
+        paper_id = json.loads(content)["id"]
+
+        box = {"page": 1, "x": 120, "y": 140, "w": 520, "h": 260, "question": 1, "review": []}
+        save_status, _, save_body = self.request(
+            "POST",
+            f"/api/papers/{paper_id}/save",
+            body=json.dumps({"boxes": [box]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(save_status, 200, save_body.decode(errors="replace"))
+        self.assertEqual(json.loads(save_body)["revision"], 1)
+
+        from PIL import Image
+
+        with Image.open(self.output_dir / "2019" / "2019_q01.png") as crop:
+            self.assertEqual(crop.size, (520, 260))
+
+        # Reloading the page returns the boxes that were saved, not the ones
+        # detection picked, so a refresh cannot silently undo the recrop.
+        reload_status, _, reload_body = self.request("GET", f"/api/papers/{paper_id}?expected=50")
+        self.assertEqual(reload_status, 200)
+        reloaded = json.loads(reload_body)
+        self.assertEqual(reloaded["revision"], 1)
+        self.assertEqual(len(reloaded["boxes"]), 1)
+        self.assertEqual(reloaded["boxes"][0]["x"], 120)
+        self.assertEqual(reloaded["boxes"][0]["y"], 140)
+        self.assertEqual(reloaded["boxes"][0]["w"], 520)
+        self.assertEqual(reloaded["boxes"][0]["h"], 260)
+
+        again_status, _, again_body = self.request(
+            "POST",
+            f"/api/papers/{paper_id}/save",
+            body=json.dumps({"boxes": [box]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(again_status, 200, again_body.decode(errors="replace"))
+        self.assertEqual(json.loads(again_body)["revision"], 2)
+
+    def test_download_all_returns_every_png_and_the_manifest(self) -> None:
+        status, _, content = self.request(
+            "POST",
+            "/api/upload?filename=2019.pdf",
+            body=self.pdf_path.read_bytes(),
+            headers={"Content-Type": "application/pdf"},
+        )
+        self.assertEqual(status, 200, content.decode(errors="replace"))
+        paper_id = json.loads(content)["id"]
+
+        zip_status, zip_headers, zip_body = self.request(
+            "GET", f"/outputs/{paper_id}/download.zip"
+        )
+        self.assertEqual(zip_status, 200)
+        content_type = next(
+            value for key, value in zip_headers.items() if key.lower() == "content-type"
+        )
+        self.assertEqual(content_type, "application/zip")
+        with zipfile.ZipFile(io.BytesIO(zip_body)) as archive:
+            self.assertEqual(
+                sorted(archive.namelist()),
+                [
+                    "2019_q01.png",
+                    "2019_q02.png",
+                    "2019_q03.png",
+                    "2019_q04.png",
+                    "manifest.json",
+                ],
+            )
+
     def test_upload_rejects_non_pdf_and_invalid_pdf(self) -> None:
         wrong_status, _, _ = self.request(
             "POST",
@@ -187,6 +265,9 @@ class UploadUiTests(unittest.TestCase):
         self.assertIn('id="review-list"', page)
         self.assertIn('id="next-flagged"', page)
         self.assertIn('id="snap-toggle"', page)
+        # Recropping from the reader's boxes and downloading them all.
+        self.assertIn('id="recrop-button"', page)
+        self.assertIn('id="download-all"', page)
         self.assertIn('id="delete-paper"', page)
         self.assertIn('id="clear-project"', page)
 

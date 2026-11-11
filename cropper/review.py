@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import atexit
+import io
 import shutil
 import tempfile
 import threading
 import uuid
+import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -67,6 +69,10 @@ class ReviewPaper:
         self.analysis: PaperAnalysis | None = None
         self.saved_files: list[str] = []
         self.saved_manifest = False
+        # The boxes the reader last saved. Reloading the page must show their
+        # edits rather than the boxes detection first chose.
+        self.boxes: list[Box] | None = None
+        self.revision = 0
         self._lock = threading.Lock()
         # Rendered pages kept for snapping, newest last. A mask is a few
         # megabytes, so only the last few pages are worth holding on to.
@@ -113,6 +119,8 @@ class ReviewPaper:
     def remove_files(self, output_root: Path) -> None:
         """Remove this paper's review files and generated outputs."""
         self._inks.clear()
+        self.boxes = None
+        self.revision = 0
         shutil.rmtree(self.preview_dir, ignore_errors=True)
         try:
             self.path.relative_to(self.preview_dir.parent / "uploads")
@@ -235,6 +243,7 @@ def create_app(session: ReviewSession) -> FastAPI:
                 "found": len({box.question for box in analysis.boxes}),
                 "files": paper.saved_files,
                 "manifest": "manifest.json" if paper.saved_manifest else None,
+                "revision": 0,
             }
         except HTTPException:
             if paper is not None and paper in session.papers:
@@ -272,6 +281,7 @@ def create_app(session: ReviewSession) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Could not read PDF: {exc}") from exc
 
+        boxes = paper.boxes if paper.boxes is not None else analysis.boxes
         return {
             "id": paper.id,
             "name": paper.name,
@@ -286,12 +296,13 @@ def create_app(session: ReviewSession) -> FastAPI:
                 }
                 for page in analysis.pages
             ],
-            "boxes": [box.to_dict() for box in analysis.boxes],
+            "boxes": [box.to_dict() for box in boxes],
             "gaps": analysis.gaps,
             "expected": analysis.expected,
-            "found": len({box.question for box in analysis.boxes}),
+            "found": len({box.question for box in boxes}),
             "files": paper.saved_files,
             "manifest": "manifest.json" if paper.saved_manifest else None,
+            "revision": paper.revision,
         }
 
     @app.get("/pages/{paper_id}/{page_number}.jpg")
@@ -363,11 +374,37 @@ def create_app(session: ReviewSession) -> FastAPI:
 
         paper.saved_files = [path.name for path in result.files]
         paper.saved_manifest = True
+        paper.boxes = boxes
+        paper.revision += 1
         return {
             "files": paper.saved_files,
             "manifest": result.manifest_path.name,
             "output_dir": str(result.output_dir.resolve()),
+            "revision": paper.revision,
         }
+
+    @app.get("/outputs/{paper_id}/download.zip")
+    def download_all(paper_id: int) -> Response:
+        """Every cropped PNG plus the manifest, in one archive."""
+        paper = session.get(paper_id)
+        if not paper.saved_files:
+            raise HTTPException(status_code=404, detail="Nothing has been cropped yet.")
+        directory = OUTPUT_ROOT / paper.path.stem
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name in paper.saved_files:
+                path = directory / Path(name).name
+                if path.is_file():
+                    archive.write(path, arcname=Path(name).name)
+            manifest = directory / "manifest.json"
+            if paper.saved_manifest and manifest.is_file():
+                archive.write(manifest, arcname="manifest.json")
+        filename = f"{paper.path.stem}_questions.zip"
+        return Response(
+            content=buffer.getvalue(),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     @app.get("/outputs/{paper_id}/{filename}")
     def download_output(paper_id: int, filename: str) -> FileResponse:

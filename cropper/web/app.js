@@ -17,6 +17,8 @@ const els = {
   resultsSummary: document.getElementById("results-summary"),
   resultGrid: document.getElementById("result-grid"),
   manifestDownload: document.getElementById("manifest-download"),
+  recropButton: document.getElementById("recrop-button"),
+  downloadAll: document.getElementById("download-all"),
   detectionSummary: document.getElementById("detection-summary"),
   expectedInput: document.getElementById("expected-input"),
   existingPaper: document.querySelector(".existing-paper"),
@@ -129,6 +131,13 @@ function makeState(data) {
     saveMessage: "",
     files: data.files || [],
     manifest: data.manifest || null,
+    // Bumped by the server on every save so the browser fetches the new crops.
+    revision: data.revision || 0,
+    // True once the PNGs on disk came from the reader's boxes rather than the
+    // detector's.
+    savedFromEdits: (data.revision || 0) > 0,
+    // True while the boxes on screen differ from the ones the PNGs came from.
+    dirty: false,
   };
 }
 
@@ -321,6 +330,8 @@ function updateControls() {
   els.addBox.classList.toggle("active", adding);
   els.saveButton.disabled = !active || busy || saving || active.boxes.length === 0;
   els.saveButton.textContent = saving ? "Saving…" : "Save PNGs";
+  els.recropButton.disabled = !active || busy || saving || active.boxes.length === 0;
+  els.recropButton.textContent = saving ? "Recropping…" : "Recrop from my boxes";
   els.hint.textContent = adding
     ? `Drag on the page to draw Q${addingQuestion ?? "?"}. Click Add box again to cancel.`
     : "Click a box to select it. Drag to move, drag a handle to resize. Shortcuts: ← → pages, Delete removes.";
@@ -424,6 +435,37 @@ function renderSummary(state) {
   els.detectionSummary.classList.toggle("has-review", flagged > 0);
 }
 
+function outputUrl(filename) {
+  // The revision changes whenever the PNGs are recropped, so the browser cannot
+  // answer with the previous crop for the same filename.
+  return `/outputs/${active.data.id}/${encodeURIComponent(filename)}?v=${active.revision || 0}`;
+}
+
+function renderResultsSummary() {
+  if (!active) {
+    return;
+  }
+  const files = active.files || [];
+  const count = files.length;
+  const noun = `question image${count === 1 ? "" : "s"}`;
+  let message;
+  if (!count) {
+    message = "No crops yet. Adjust the boxes, then recrop to write PNGs from them.";
+  } else if (active.dirty) {
+    message = `${count} ${noun} on disk from the last save. You have changed the boxes since — recrop to crop them from your boxes.`;
+  } else if (active.savedFromEdits) {
+    message = `${count} ${noun} cropped from the boxes you set, saved to ${active.data.output}`;
+  } else {
+    message = `${count} ${noun} cropped from the automatic detection, saved to ${active.data.output}`;
+  }
+  els.resultsSummary.textContent = message;
+  els.resultsSummary.classList.toggle("dirty", Boolean(active.dirty) && count > 0);
+  els.downloadAll.classList.toggle("hidden", count === 0);
+  if (count) {
+    els.downloadAll.href = `/outputs/${active.data.id}/download.zip?v=${active.revision || 0}`;
+  }
+}
+
 function renderResults() {
   if (!active) {
     return;
@@ -431,20 +473,17 @@ function renderResults() {
   const files = active.files || [];
   els.results.classList.toggle("hidden", files.length === 0);
   els.resultsTitle.textContent = `Cropped questions · ${active.data.name}`;
-  els.resultsSummary.textContent = files.length
-    ? `${files.length} question image${files.length === 1 ? "" : "s"} saved to ${active.data.output}`
-    : "No automatic crops yet. Add or adjust boxes below, then save PNGs.";
+  renderResultsSummary();
   els.manifestDownload.classList.toggle("hidden", !active.manifest);
-  els.manifestDownload.href = active.manifest
-    ? `/outputs/${active.data.id}/${encodeURIComponent(active.manifest)}`
-    : "#";
+  els.manifestDownload.href = active.manifest ? outputUrl(active.manifest) : "#";
   els.resultGrid.replaceChildren();
 
   for (const filename of files) {
     const card = document.createElement("article");
     card.className = "result-card";
     const image = document.createElement("img");
-    image.src = `/outputs/${active.data.id}/${encodeURIComponent(filename)}`;
+    const url = outputUrl(filename);
+    image.src = url;
     image.alt = filename;
     image.loading = "lazy";
     const info = document.createElement("div");
@@ -453,7 +492,7 @@ function renderResults() {
     name.textContent = filename;
     const download = document.createElement("a");
     download.className = "download-link";
-    download.href = image.src;
+    download.href = url;
     download.download = filename;
     download.textContent = "Download PNG";
     info.append(name, download);
@@ -650,6 +689,9 @@ async function snapBox(box, element) {
 function clearSaveStatus() {
   if (active) {
     active.saveMessage = "";
+    // The boxes no longer match the PNGs that were written from them.
+    active.dirty = true;
+    renderResultsSummary();
   }
   els.saveStatus.textContent = "";
 }
@@ -1003,10 +1045,13 @@ async function saveAll() {
     active.files = result.files;
     active.manifest = result.manifest;
     active.data.output = result.output_dir;
-    active.saveMessage = `Saved ${result.files.length} PNG(s) + ${result.manifest}`;
+    active.revision = result.revision || (active.revision || 0) + 1;
+    active.savedFromEdits = true;
+    active.dirty = false;
+    active.saveMessage = `Recropped ${result.files.length} PNG(s) from your boxes`;
     els.saveStatus.textContent = active.saveMessage;
     renderResults();
-    toast(`Saved ${result.files.length} question PNG(s). Download them above.`);
+    toast(`Recropped ${result.files.length} question PNG(s) from your boxes. Download them above.`);
   } catch (error) {
     toast(error.message, true);
   } finally {
@@ -1070,6 +1115,7 @@ function bindEvents() {
   els.questionInput.addEventListener("input", onQuestionInput);
   els.questionInput.addEventListener("change", onQuestionChange);
   els.saveButton.addEventListener("click", saveAll);
+  els.recropButton.addEventListener("click", saveAll);
   els.overlay.addEventListener("pointerdown", onOverlayPointerDown);
   els.pageImage.addEventListener("error", () => {
     toast("Could not load the page image.", true);

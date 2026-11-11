@@ -27,7 +27,7 @@
         <button id="upload-button" class="btn" type="button">Choose PDF</button>
         <button id="delete-paper" class="btn danger" type="button" disabled>Delete PDF</button>
         <button id="clear-project" class="btn danger" type="button">Clear project</button>
-        <button id="save-button" class="btn primary" type="button" disabled>Save PNGs</button>
+        <button id="save-button" class="btn primary" type="button" disabled title="Crop every PNG again from the boxes you have moved">Save PNGs</button>
       </div>
     </div>
     <div id="toolbar" class="bar toolbar hidden">
@@ -65,7 +65,11 @@
             <h2 id="results-title">Cropped questions</h2>
             <p id="results-summary"></p>
           </div>
-          <a id="manifest-download" class="btn" href="#" download>Download manifest</a>
+          <div class="results-actions">
+            <button id="recrop-button" class="btn primary" type="button" disabled>Recrop from my boxes</button>
+            <a id="download-all" class="btn hidden" href="#" download>Download all PNGs</a>
+            <a id="manifest-download" class="btn" href="#" download>Download manifest</a>
+          </div>
         </div>
         <div id="result-grid" class="result-grid"></div>
       </section>

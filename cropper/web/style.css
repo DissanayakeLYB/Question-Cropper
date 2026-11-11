@@ -293,8 +293,32 @@ button:focus-visible {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 14px;
   margin-bottom: 16px;
+}
+
+.results-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.results-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.results-actions .btn.hidden {
+  display: none;
+}
+
+/* Boxes were moved after the crops were written, so the PNGs are stale. */
+.results-heading p.dirty {
+  color: var(--orange);
+  font-weight: 600;
 }
 
 .results-heading h2 {
