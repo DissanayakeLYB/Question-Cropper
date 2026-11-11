@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Scope
 from pydantic import BaseModel, Field
 
 from . import DPI
@@ -26,6 +27,19 @@ from .pipeline import analyze_pdf
 WEB_DIR = Path(__file__).resolve().parent / "web"
 OUTPUT_ROOT = Path("output")
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """Serve the page's own assets fresh so a browser cannot keep an old UI.
+
+    The review page is edited on this machine between server runs, and cached
+    HTML/JS can leave a new page half-mismatched with old code.
+    """
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
 
 class BoxPayload(BaseModel):
@@ -179,11 +193,11 @@ class ReviewSession:
 def create_app(session: ReviewSession) -> FastAPI:
     app = FastAPI(title="Question Cropper", docs_url=None, redoc_url=None)
     app.state.session = session
-    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=WEB_DIR), name="static")
 
     @app.get("/")
     def index() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html")
+        return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
     @app.post("/api/upload")
     async def upload_pdf(
@@ -352,18 +366,22 @@ def create_app(session: ReviewSession) -> FastAPI:
             if item.page not in page_sizes:
                 raise HTTPException(status_code=400, detail=f"Page {item.page} does not exist.")
             width, height = page_sizes[item.page]
-            x0 = int(round(item.x))
-            y0 = int(round(item.y))
-            x1 = x0 + int(round(item.w))
-            y1 = y0 + int(round(item.h))
-            if x0 < 0 or y0 < 0 or x1 > width or y1 > height:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Question {item.question}: box is outside page {item.page}.",
-                )
+            # A dragged edge can land a point past the page edge once the client
+            # rounds its coordinates. Clamping keeps one such box from failing
+            # a save of every other crop the reader adjusted.
+            limit_x = int(width)
+            limit_y = int(height)
+            x0 = min(max(0, int(round(item.x))), limit_x)
+            y0 = min(max(0, int(round(item.y))), limit_y)
+            x1 = min(max(0, x0 + int(round(item.w))), limit_x)
+            y1 = min(max(0, y0 + int(round(item.h))), limit_y)
             if x1 - x0 < 2 or y1 - y0 < 2:
                 raise HTTPException(
-                    status_code=400, detail=f"Question {item.question}: box is too small."
+                    status_code=400,
+                    detail=(
+                        f"Question {item.question}: box is too small or lies outside "
+                        f"page {item.page}."
+                    ),
                 )
             boxes.append(Box(item.question, item.page, x0, y0, x1, y1, list(item.review)))
 

@@ -188,6 +188,52 @@ class UploadUiTests(unittest.TestCase):
         self.assertEqual(again_status, 200, again_body.decode(errors="replace"))
         self.assertEqual(json.loads(again_body)["revision"], 2)
 
+    def test_page_and_assets_are_not_cached(self) -> None:
+        # A cached page would keep an old editor and buttons that no longer match
+        # the running code.
+        for path in ("/", "/static/app.js", "/static/style.css"):
+            status, headers, _ = self.request("GET", path)
+            self.assertEqual(status, 200, path)
+            cache = next(
+                (value for key, value in headers.items() if key.lower() == "cache-control"), ""
+            )
+            self.assertEqual(cache, "no-store", f"{path} sent Cache-Control: {cache!r}")
+
+    def test_save_clamps_an_edge_that_rounds_past_the_page(self) -> None:
+        status, _, content = self.request(
+            "POST",
+            "/api/upload?filename=2019.pdf",
+            body=self.pdf_path.read_bytes(),
+            headers={"Content-Type": "application/pdf"},
+        )
+        self.assertEqual(status, 200, content.decode(errors="replace"))
+        data = json.loads(content)
+        page = data["pages"][0]
+
+        # Dragging to the page edge can round a point past it; that must crop to
+        # the edge instead of failing every other box in the save.
+        box = {
+            "page": 1,
+            "x": page["width"] - 40,
+            "y": page["height"] - 30,
+            "w": 60,
+            "h": 60,
+            "question": 7,
+            "review": [],
+        }
+        save_status, _, save_body = self.request(
+            "POST",
+            f"/api/papers/{data['id']}/save",
+            body=json.dumps({"boxes": [box]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(save_status, 200, save_body.decode(errors="replace"))
+
+        from PIL import Image
+
+        with Image.open(self.output_dir / "2019" / "2019_q07.png") as crop:
+            self.assertEqual(crop.size, (40, 30))
+
     def test_download_all_returns_every_png_and_the_manifest(self) -> None:
         status, _, content = self.request(
             "POST",

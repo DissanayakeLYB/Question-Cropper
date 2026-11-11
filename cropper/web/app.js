@@ -330,8 +330,11 @@ function updateControls() {
   els.addBox.classList.toggle("active", adding);
   els.saveButton.disabled = !active || busy || saving || active.boxes.length === 0;
   els.saveButton.textContent = saving ? "Saving…" : "Save PNGs";
-  els.recropButton.disabled = !active || busy || saving || active.boxes.length === 0;
-  els.recropButton.textContent = saving ? "Recropping…" : "Recrop from my boxes";
+  // Guarded so an old cached page cannot take the whole editor down.
+  if (els.recropButton) {
+    els.recropButton.disabled = !active || busy || saving || active.boxes.length === 0;
+    els.recropButton.textContent = saving ? "Recropping…" : "Recrop from my boxes";
+  }
   els.hint.textContent = adding
     ? `Drag on the page to draw Q${addingQuestion ?? "?"}. Click Add box again to cancel.`
     : "Click a box to select it. Drag to move, drag a handle to resize. Shortcuts: ← → pages, Delete removes.";
@@ -460,9 +463,11 @@ function renderResultsSummary() {
   }
   els.resultsSummary.textContent = message;
   els.resultsSummary.classList.toggle("dirty", Boolean(active.dirty) && count > 0);
-  els.downloadAll.classList.toggle("hidden", count === 0);
-  if (count) {
-    els.downloadAll.href = `/outputs/${active.data.id}/download.zip?v=${active.revision || 0}`;
+  if (els.downloadAll) {
+    els.downloadAll.classList.toggle("hidden", count === 0);
+    if (count) {
+      els.downloadAll.href = `/outputs/${active.data.id}/download.zip?v=${active.revision || 0}`;
+    }
   }
 }
 
@@ -741,10 +746,7 @@ function startMove(event, box, element, page) {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", finish);
     window.removeEventListener("pointercancel", finish);
-    box.x = Math.round(box.x);
-    box.y = Math.round(box.y);
-    box.w = Math.round(box.w);
-    box.h = Math.round(box.h);
+    fitBoxToPage(box, page);
     applyBoxRect(element, box, page);
     clearReview(box, element);
     clearSaveStatus();
@@ -804,10 +806,7 @@ function startResize(event, box, direction, element) {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", finish);
     window.removeEventListener("pointercancel", finish);
-    box.x = Math.round(box.x);
-    box.y = Math.round(box.y);
-    box.w = Math.round(box.w);
-    box.h = Math.round(box.h);
+    fitBoxToPage(box, page);
     applyBoxRect(element, box, page);
     clearReview(box, element);
     clearSaveStatus();
@@ -818,6 +817,17 @@ function startResize(event, box, direction, element) {
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", finish);
   window.addEventListener("pointercancel", finish);
+}
+
+function fitBoxToPage(box, page) {
+  // Round to whole points, then clamp, so x + w can never poke a pixel past the
+  // page edge and get the save rejected.
+  const width = Math.floor(page.width);
+  const height = Math.floor(page.height);
+  box.w = clamp(Math.round(box.w), MIN_BOX, width);
+  box.h = clamp(Math.round(box.h), MIN_BOX, height);
+  box.x = clamp(Math.round(box.x), 0, width - box.w);
+  box.y = clamp(Math.round(box.y), 0, height - box.h);
 }
 
 function drawDefaultBox(page, start) {
@@ -1051,6 +1061,7 @@ async function saveAll() {
     active.saveMessage = `Recropped ${result.files.length} PNG(s) from your boxes`;
     els.saveStatus.textContent = active.saveMessage;
     renderResults();
+    els.results.scrollIntoView({ behavior: "smooth", block: "nearest" });
     toast(`Recropped ${result.files.length} question PNG(s) from your boxes. Download them above.`);
   } catch (error) {
     toast(error.message, true);
@@ -1115,7 +1126,9 @@ function bindEvents() {
   els.questionInput.addEventListener("input", onQuestionInput);
   els.questionInput.addEventListener("change", onQuestionChange);
   els.saveButton.addEventListener("click", saveAll);
-  els.recropButton.addEventListener("click", saveAll);
+  if (els.recropButton) {
+    els.recropButton.addEventListener("click", saveAll);
+  }
   els.overlay.addEventListener("pointerdown", onOverlayPointerDown);
   els.pageImage.addEventListener("error", () => {
     toast("Could not load the page image.", true);
