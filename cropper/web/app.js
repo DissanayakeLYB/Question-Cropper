@@ -46,6 +46,7 @@ const els = {
   loadingText: document.getElementById("loading-text"),
   loadingHint: document.getElementById("loading-hint"),
   toast: document.getElementById("toast"),
+  themeToggle: document.getElementById("theme-toggle"),
 };
 
 const paperStates = new Map();
@@ -1149,8 +1150,42 @@ async function saveAll() {
   }
 }
 
+const THEME_KEY = "question-cropper-theme";
+
+function themeSetting() {
+  // Dark is the default; a saved choice only ever overrides it with light.
+  try {
+    return window.localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
+  } catch (error) {
+    return "dark";
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const dark = theme === "dark";
+  if (els.themeToggle) {
+    els.themeToggle.textContent = dark ? "Light mode" : "Dark mode";
+    els.themeToggle.title = `Switch to ${dark ? "light" : "dark"} mode`;
+    els.themeToggle.setAttribute("aria-pressed", String(dark));
+  }
+}
+
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  try {
+    window.localStorage.setItem(THEME_KEY, next);
+  } catch (error) {
+    // Blocked storage only costs the preference, not the toggle itself.
+  }
+  applyTheme(next);
+}
+
 function bindEvents() {
   const openFilePicker = () => els.uploadInput.click();
+  if (els.themeToggle) {
+    els.themeToggle.addEventListener("click", toggleTheme);
+  }
   els.uploadButton.addEventListener("click", openFilePicker);
   els.deletePaper.addEventListener("click", deletePaper);
   els.clearProject.addEventListener("click", clearProject);
@@ -1237,6 +1272,7 @@ function bindEvents() {
 }
 
 async function init() {
+  applyTheme(themeSetting());
   bindEvents();
   updateControls();
   try {
