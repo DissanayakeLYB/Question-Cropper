@@ -1,68 +1,47 @@
 # Question Cropper
 
-Extracts individual questions from Sri Lankan A/L Physics past-paper PDFs and saves them as PNG files. Use automatic detection for a quick result or the local review page to correct crop boundaries.
+Cuts each question out of Sri Lankan A/L Physics past-paper PDFs, one PNG per question, with a local review page for fixing the crop boxes by hand.
 
-## Requirements
+## Quick start (Windows)
 
-- Python 3.11+
-- Tesseract OCR for scanned PDFs without a text layer
+Double-click **`run.bat`**. It starts the local server on a free port and opens the review page in your browser; on a fresh copy it creates `.venv` and installs the dependencies first.
 
-## Setup
+- Choose a PDF in the page, or drag a PDF (or a folder of PDFs) onto `run.bat` to open it straight away.
+- Keep the window open while you work. Closing it stops the server.
+
+## Setup without the .bat
 
 ```bash
 python -m venv .venv
-```
-
-Activate the environment (`.venv\Scripts\activate` on Windows or `source .venv/bin/activate` on macOS/Linux), then install the dependencies:
-
-```bash
+.venv\Scripts\activate        # Windows
+source .venv/bin/activate     # macOS/Linux
 pip install -r requirements.txt
 ```
 
-For scanned PDFs, install [Tesseract](https://github.com/tesseract-ocr/tesseract) and make sure `tesseract` is on your `PATH`.
+Python 3.11+. Scanned PDFs also need [Tesseract](https://github.com/tesseract-ocr/tesseract) on your `PATH`; `run.bat` adds `C:\Program Files\Tesseract-OCR` when it finds it there.
 
-## Usage
-
-Crop one PDF or all PDFs in a folder automatically:
+## Command line
 
 ```bash
-python -m cropper auto paper.pdf
-python -m cropper auto papers/
+python -m cropper review            # review page, upload PDFs in the browser
+python -m cropper review paper.pdf  # review page with one paper already loaded
+python -m cropper auto paper.pdf    # detect and crop without reviewing
+python -m cropper auto papers/      # every PDF in a folder
 ```
 
-The default expected question count is 50. Change it with `-n`:
+Papers are assumed to have 50 questions; use `-n 40` for a different count.
 
-```bash
-python -m cropper auto paper.pdf -n 40
-```
+## Review page
 
-Open the review page:
+Red boxes need a look and are listed under **Needs review**; good boxes are blue and **Next flagged** steps through the red ones. Drag a box to move it, drag a handle to resize, **+ Add box** fills in a missing question number, **Delete** removes the selected box. **Snap to text** moves a dragged edge onto the nearest blank row.
 
-```bash
-python -m cropper review
-python -m cropper review paper.pdf
-```
-
-The review page lets you move, resize, add, or remove boxes before saving PNGs. Boxes that need a look are red and listed under **Needs review**, good boxes are blue, and **Next flagged** jumps to the next one. **Snap to text** moves a dragged edge to the nearest blank row, and **+ Add box** fills in the next missing question number.
-
-**Save PNGs** (or **Recrop from my boxes**) rewrites every PNG and the manifest from the boxes as they are on screen, not from the boxes detection first chose; the page says when the crops are stale, and **Download all PNGs** fetches them in one zip. Use `←` and `→` to change pages and `Delete` to remove the selected box. Boxes with the same question number are combined, so questions spanning multiple pages can be joined.
-
-To run an upload-only server:
-
-```bash
-uvicorn cropper.review:create_default_app --factory --host 0.0.0.0 --port 8000
-```
-
-Then open `http://localhost:8000`. The server has no authentication; keep it local or put it behind authentication and HTTPS.
+**Recrop from my boxes** (or **Save PNGs**) rewrites every PNG and the manifest from the boxes as they are on screen, and **Download all PNGs** fetches them in one zip. A processing screen covers the page while that runs, since a long paper takes a minute or two.
 
 ## Output
 
-Results are saved under `output/<pdf name>/`:
+`output/<pdf name>/` gets `2019_q01.png`, `2019_q02.png`, … plus `manifest.json` with the boxes and review warnings. Boxes sharing a question number are joined, so a question spanning two pages becomes one PNG.
 
-- One PNG per question, such as `2019_q01.png`
-- `manifest.json` containing crop metadata and review warnings
-
-Automatic detection is heuristic, so review each new paper. Unusual layouts, poor scans, missing question numbers, and figures crossing columns may require manual corrections. Papers default to 50 questions unless another count is specified.
+Detection is heuristic: check each new paper, especially unusual layouts, poor scans, missing question numbers and figures that cross columns.
 
 ## Tests
 
