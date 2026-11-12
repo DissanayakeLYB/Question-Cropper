@@ -41,6 +41,10 @@ class QuestionStart:
     page: int  # 1-based
     column: int
     y0: float
+    # False for a number that repeats one already seen, such as a second
+    # section that restarts at 1. It still ends the question above it, but must
+    # not open another crop for a number that already has one.
+    opens_question: bool = True
 
 
 @dataclass
@@ -321,7 +325,14 @@ def question_alignments(
     return alignments
 
 
-def find_question_starts(pages: list[PageInfo]) -> list[QuestionStart]:
+def find_question_starts(
+    pages: list[PageInfo], expected: int | None = None
+) -> list[QuestionStart]:
+    """Question numbers in reading order, one opening crop each.
+
+    ``expected`` is the paper's question count: numbers past it, and numbers that
+    do not move the run forward, are kept as boundaries only.
+    """
     starts: list[QuestionStart] = []
     for page in pages:
         tolerance = max(12.0, page.width * 0.015)
@@ -360,6 +371,18 @@ def find_question_starts(pages: list[PageInfo]) -> list[QuestionStart]:
             continue
         seen[key] = start.y0
         deduped.append(start)
+
+    # Numbering only ever moves forward in a paper. A start that is not higher
+    # than one already accepted is a restart ("1." again in a second section)
+    # or a number inside body text, so it becomes a boundary only.
+    highest = 0
+    over_limit = expected is not None and expected > 0
+    for start in deduped:
+        beyond_expected = over_limit and start.question > expected
+        if start.question <= highest or beyond_expected:
+            start.opens_question = False
+            continue
+        highest = start.question
     return deduped
 
 
@@ -404,7 +427,11 @@ def build_segments(starts: list[QuestionStart], pages: list[PageInfo]) -> list[S
     """Turn question starts into raw crop rectangles in reading order."""
     segments: list[Segment] = []
     for index, start in enumerate(starts):
+        # A boundary still limits the question above it, but only a start that
+        # opens a question produces a crop.
         following = starts[index + 1] if index + 1 < len(starts) else None
+        if not start.opens_question:
+            continue
         segments.extend(_segments_between(start, following, pages))
     return segments
 

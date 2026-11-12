@@ -65,7 +65,7 @@ def analyze_pdf(
         detect_margins(pages)
         for page in pages:
             detect_columns(page)
-        starts = find_question_starts(pages)
+        starts = find_question_starts(pages, expected_count)
         starts = rescue_missing_starts(doc, pages, starts, expected_count)
         segments = build_segments(starts, pages)
 

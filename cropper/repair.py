@@ -42,11 +42,21 @@ def _ordered(starts: list[QuestionStart]) -> list[QuestionStart]:
     return sorted(starts, key=lambda start: (start.page, start.column, start.y0))
 
 
+def _numbering(starts: list[QuestionStart]) -> list[QuestionStart]:
+    """The starts that open a question, in reading order.
+
+    Boundaries left by a repeated number (a second section that restarts at 1)
+    are not part of the numbering, so they must not decide where a missing
+    number is looked for.
+    """
+    return _ordered([start for start in starts if start.opens_question])
+
+
 def rescue_missing_starts(
     doc: pymupdf.Document, pages: list[PageInfo], starts: list[QuestionStart], expected: int
 ) -> list[QuestionStart]:
     """Fill numbering gaps by searching between each pair of neighbours."""
-    gaps = find_question_gaps(starts, expected)
+    gaps = find_question_gaps(_numbering(starts), expected)
     if not gaps:
         return starts
 
@@ -61,7 +71,7 @@ def rescue_missing_starts(
 def _rescue_one(
     doc: pymupdf.Document, pages: list[PageInfo], starts: list[QuestionStart], number: int
 ) -> QuestionStart | None:
-    ordered = _ordered(starts)
+    ordered = _numbering(starts)
     previous = None
     following = None
     for start in ordered:

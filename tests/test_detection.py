@@ -9,6 +9,7 @@ from PIL import Image
 
 from cropper.detect import (
     QuestionStart,
+    build_segments,
     find_question_gaps,
     find_question_starts,
     format_number_ranges,
@@ -16,6 +17,7 @@ from cropper.detect import (
 from cropper.models import Column, PageInfo, TextLine
 from cropper.page import ocr_lines
 from cropper.pipeline import analyze_pdf
+from cropper.repair import rescue_missing_starts
 from tests.helpers import make_scanned_pdf, make_single_column_pdf, make_two_column_pdf
 
 
@@ -136,6 +138,114 @@ class DetectionTests(unittest.TestCase):
         starts = find_question_starts([page])
         self.assertEqual([start.question for start in starts], [27])
         self.assertEqual(starts[0].y0, 1927)
+
+    def test_restarted_numbering_does_not_open_a_second_box(self) -> None:
+        """A second section that starts at 1 again must not duplicate question 1."""
+        first = PageInfo(
+            number=1,
+            width=1653,
+            height=2339,
+            lines=[
+                TextLine("1. first question", 210, 300, 1400, 330),
+                TextLine("2. second question", 210, 700, 1400, 730),
+            ],
+            thumb=Image.new("L", (10, 10), 255),
+            thumb_scale=0.1,
+            content_top=100.0,
+            content_bottom=2100.0,
+            columns=[Column(0, 1653, left_margin=200.0)],
+        )
+        second = PageInfo(
+            number=2,
+            width=1653,
+            height=2339,
+            lines=[TextLine("1. second section", 210, 500, 1400, 530)],
+            thumb=Image.new("L", (10, 10), 255),
+            thumb_scale=0.1,
+            content_top=100.0,
+            content_bottom=2100.0,
+            columns=[Column(0, 1653, left_margin=200.0)],
+        )
+
+        starts = find_question_starts([first, second])
+        self.assertEqual(
+            [(start.question, start.page, start.opens_question) for start in starts],
+            [(1, 1, True), (2, 1, True), (1, 2, False)],
+        )
+
+        segments = build_segments(starts, [first, second])
+        self.assertEqual(sorted({segment.question for segment in segments}), [1, 2])
+        question_one = [segment for segment in segments if segment.question == 1]
+        self.assertEqual(len(question_one), 1)
+        self.assertEqual(question_one[0].page, 1)
+        # The repeated number still ends question 2 instead of letting it run on.
+        question_two = [segment for segment in segments if segment.question == 2]
+        self.assertEqual(question_two[-1].page, 2)
+        self.assertEqual(question_two[-1].y1, 500.0)
+
+    def test_number_beyond_the_expected_count_does_not_open_a_box(self) -> None:
+        page = PageInfo(
+            number=1,
+            width=1653,
+            height=2339,
+            lines=[
+                TextLine("1. first question", 210, 300, 1400, 330),
+                TextLine("2. second question", 210, 700, 1400, 730),
+                TextLine("3. appendix note", 210, 1100, 1400, 1130),
+            ],
+            thumb=Image.new("L", (10, 10), 255),
+            thumb_scale=0.1,
+            content_top=100.0,
+            content_bottom=2100.0,
+            columns=[Column(0, 1653, left_margin=200.0)],
+        )
+
+        starts = find_question_starts([page], expected=2)
+        self.assertEqual(
+            [(start.question, start.opens_question) for start in starts],
+            [(1, True), (2, True), (3, False)],
+        )
+        segments = build_segments(starts, [page])
+        self.assertEqual(sorted({segment.question for segment in segments}), [1, 2])
+
+    def test_rescue_searches_the_numbering_not_a_restarted_section(self) -> None:
+        """A missing number is looked for between its real neighbours."""
+        first = PageInfo(
+            number=1,
+            width=1653,
+            height=2339,
+            lines=[
+                TextLine("1. first question", 210, 100, 1400, 130),
+                TextLine("3. third question", 210, 900, 1400, 930),
+            ],
+            thumb=Image.new("L", (165, 234), 255),
+            thumb_scale=0.1,
+            content_top=0.0,
+            content_bottom=2100.0,
+            columns=[Column(0, 1653, left_margin=200.0)],
+        )
+        second = PageInfo(
+            number=2,
+            width=1653,
+            height=2339,
+            lines=[TextLine("1. second section", 210, 200, 1400, 230)],
+            thumb=Image.new("L", (165, 234), 255),
+            thumb_scale=0.1,
+            content_top=0.0,
+            content_bottom=2100.0,
+            columns=[Column(0, 1653, left_margin=200.0)],
+        )
+
+        starts = find_question_starts([first, second], expected=3)
+        self.assertEqual(
+            [(start.question, start.page, start.opens_question) for start in starts],
+            [(1, 1, True), (3, 1, True), (1, 2, False)],
+        )
+
+        rescued = rescue_missing_starts(None, [first, second], starts, 3)
+        rescued_two = [start for start in rescued if start.question == 2]
+        self.assertEqual(len(rescued_two), 1)
+        self.assertEqual(rescued_two[0].page, 1)
 
     def test_missing_numbers_are_reported_as_gaps(self) -> None:
         starts = [QuestionStart(number, 1, 0, number * 10.0) for number in (1, 2, 3, 6, 7)]
