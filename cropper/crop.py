@@ -93,8 +93,6 @@ def save_questions(
             if box.x1 - box.x0 <= 1 or box.y1 - box.y0 <= 1:
                 raise ValueError(f"Question {box.question}: box on page {box.page} is too small.")
 
-        _remove_old_outputs(output_dir, pdf_path.stem)
-
         cache: dict[int, Image.Image] = {}
 
         def page_image(page_index: int) -> Image.Image:
@@ -156,14 +154,28 @@ def save_questions(
         manifest_path.write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
+        # Old crops go only once the new ones are on disk: one file another
+        # program still holds open must not stop a recrop from being written.
+        _remove_stale_outputs(output_dir, pdf_path.stem, {path.name for path in files})
     finally:
         doc.close()
 
     return SaveResult(output_dir=output_dir, files=files, manifest_path=manifest_path)
 
 
-def _remove_old_outputs(output_dir: Path, stem: str) -> None:
+def _remove_stale_outputs(output_dir: Path, stem: str, keep: set[str]) -> None:
+    """Delete question PNGs from an earlier save that this one did not write."""
     prefix = f"{stem}_q"
     for entry in output_dir.iterdir():
-        if entry.is_file() and entry.name.startswith(prefix) and entry.suffix.lower() == ".png":
+        if entry.name in keep:
+            continue
+        if not entry.is_file() or not entry.name.startswith(prefix):
+            continue
+        if entry.suffix.lower() != ".png":
+            continue
+        try:
             entry.unlink()
+        except OSError:
+            # Windows keeps a file another program has open; leave it behind
+            # rather than failing a recrop that has already written its crops.
+            continue

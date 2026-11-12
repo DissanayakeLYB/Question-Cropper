@@ -52,6 +52,9 @@ let papers = [];
 let active = null;
 let busy = false;
 let saving = false;
+// Snaps still on the wire. A save waits for them, so it posts the edges that
+// are on screen rather than the ones a drag left behind.
+const snapsInFlight = new Set();
 let adding = false;
 let addingQuestion = null;
 let toastTimer = null;
@@ -62,8 +65,21 @@ function clamp(value, minimum, maximum) {
   return Math.min(Math.max(value, minimum), maximum);
 }
 
-async function api(url, options = {}) {
-  const response = await fetch(url, options);
+async function api(url, options = {}, timeoutMs = 0) {
+  // A request that never settles would leave the Recrop button disabled for
+  // good, so a long save can be given up on instead of freezing the page.
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timer = controller
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+  let response;
+  try {
+    response = await fetch(url, controller ? { ...options, signal: controller.signal } : options);
+  } finally {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+    }
+  }
   let body = null;
   try {
     body = await response.json();
@@ -91,6 +107,13 @@ function toast(message, isError = false) {
   toastTimer = window.setTimeout(() => {
     els.toast.classList.add("hidden");
   }, 7000);
+}
+
+function waitForSnaps() {
+  if (snapsInFlight.size === 0) {
+    return Promise.resolve();
+  }
+  return Promise.allSettled([...snapsInFlight]);
 }
 
 function showLoading(text) {
@@ -188,7 +211,9 @@ function activate(state) {
   els.welcome.classList.add("hidden");
   els.paperWorkspace.classList.remove("hidden");
   els.toolbar.classList.remove("hidden");
-  els.results.classList.toggle("hidden", state.files.length === 0);
+  // The results area holds the recrop and download controls, so it stays on
+  // screen even before the first save.
+  els.results.classList.remove("hidden");
   els.existingPaper.classList.toggle("hidden", papers.length < 2);
   renderResults();
   els.paperSelect.value = String(state.data.id);
@@ -476,7 +501,7 @@ function renderResults() {
     return;
   }
   const files = active.files || [];
-  els.results.classList.toggle("hidden", files.length === 0);
+  els.results.classList.remove("hidden");
   els.resultsTitle.textContent = `Cropped questions · ${active.data.name}`;
   renderResultsSummary();
   els.manifestDownload.classList.toggle("hidden", !active.manifest);
@@ -664,7 +689,7 @@ async function snapBox(box, element) {
   box.snapToken = (box.snapToken || 0) + 1;
   const token = box.snapToken;
   try {
-    const snapped = await api(`/api/papers/${active.data.id}/snap`, {
+    const request = api(`/api/papers/${active.data.id}/snap`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -675,6 +700,13 @@ async function snapBox(box, element) {
         h: Math.max(2, Math.round(box.h)),
       }),
     });
+    snapsInFlight.add(request);
+    let snapped;
+    try {
+      snapped = await request;
+    } finally {
+      snapsInFlight.delete(request);
+    }
     if (!active || box.snapToken !== token || box.page !== active.page) {
       return;
     }
@@ -1034,8 +1066,22 @@ function serializeBox(box) {
   };
 }
 
+// Recropping a long paper writes tens of megabytes of PNGs. Give up rather
+// than leave the button disabled forever when the server never answers.
+const RECROP_TIMEOUT_MS = 240000;
+
 async function saveAll() {
-  if (!active || busy || saving) {
+  if (!active) {
+    return;
+  }
+  // Returning silently here is what made the button look frozen: a click while
+  // a recrop was running did nothing at all.
+  if (saving) {
+    toast("Still recropping the boxes you changed. The crops refresh when it finishes.");
+    return;
+  }
+  if (busy) {
+    toast("Wait for the current job to finish, then recrop.");
     return;
   }
   if (active.boxes.length === 0) {
@@ -1044,14 +1090,24 @@ async function saveAll() {
   }
 
   saving = true;
+  const count = active.boxes.length;
+  const boxes = `box${count === 1 ? "" : "es"}`;
+  showLoading(`Recropping ${count} ${boxes}…`);
   updateControls();
   els.saveStatus.textContent = "";
+  toast(`Recropping ${count} ${boxes} from your edges — this can take a minute on a long paper.`);
   try {
-    const result = await api(`/api/papers/${active.data.id}/save`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ boxes: active.boxes.map(serializeBox) }),
-    });
+    // Post the snapped edges, not the ones a drag left in flight.
+    await waitForSnaps();
+    const result = await api(
+      `/api/papers/${active.data.id}/save`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boxes: active.boxes.map(serializeBox) }),
+      },
+      RECROP_TIMEOUT_MS
+    );
     active.files = result.files;
     active.manifest = result.manifest;
     active.data.output = result.output_dir;
@@ -1064,9 +1120,17 @@ async function saveAll() {
     els.results.scrollIntoView({ behavior: "smooth", block: "nearest" });
     toast(`Recropped ${result.files.length} question PNG(s) from your boxes. Download them above.`);
   } catch (error) {
-    toast(error.message, true);
+    if (error && error.name === "AbortError") {
+      toast(
+        "The recrop did not finish in time. Check the server window, then try again.",
+        true
+      );
+    } else {
+      toast(error.message, true);
+    }
   } finally {
     saving = false;
+    hideLoading();
     updateControls();
   }
 }

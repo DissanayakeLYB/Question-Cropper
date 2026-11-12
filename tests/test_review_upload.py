@@ -234,6 +234,36 @@ class UploadUiTests(unittest.TestCase):
         with Image.open(self.output_dir / "2019" / "2019_q07.png") as crop:
             self.assertEqual(crop.size, (40, 30))
 
+    def test_save_writes_crops_around_a_locked_old_output(self) -> None:
+        # Windows will not delete a file another program holds open. The save
+        # used to delete every old crop first, so one locked PNG aborted the
+        # recrop and the crops on disk never changed.
+        status, _, content = self.request(
+            "POST",
+            "/api/upload?filename=2019.pdf",
+            body=self.pdf_path.read_bytes(),
+            headers={"Content-Type": "application/pdf"},
+        )
+        self.assertEqual(status, 200, content.decode(errors="replace"))
+        paper_id = json.loads(content)["id"]
+        stale_crop = self.output_dir / "2019" / "2019_q02.png"
+        self.assertTrue(stale_crop.is_file())
+
+        box = {"page": 1, "x": 50, "y": 60, "w": 300, "h": 200, "question": 1, "review": []}
+        with stale_crop.open("rb"):
+            save_status, _, save_body = self.request(
+                "POST",
+                f"/api/papers/{paper_id}/save",
+                body=json.dumps({"boxes": [box]}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            self.assertEqual(save_status, 200, save_body.decode(errors="replace"))
+
+        from PIL import Image
+
+        with Image.open(self.output_dir / "2019" / "2019_q01.png") as crop:
+            self.assertEqual(crop.size, (300, 200))
+
     def test_download_all_returns_every_png_and_the_manifest(self) -> None:
         status, _, content = self.request(
             "POST",
@@ -283,16 +313,26 @@ class UploadUiTests(unittest.TestCase):
         self.assertEqual(len(self.session.papers), 0)
 
     def test_upload_rejects_over_limit_content_length(self) -> None:
-        status, _, _ = self.request(
-            "POST",
-            "/api/upload?filename=large.pdf",
-            body=b"%PDF",
-            headers={
-                "Content-Type": "application/pdf",
-                "Content-Length": str(100 * 1024 * 1024 + 1),
-            },
-        )
-        self.assertEqual(status, 413)
+        # The declared length is rejected before the body is read, so the server
+        # closes the connection while a client is still sending. Reading that as
+        # a urllib response sometimes raises a reset instead of the 413, so talk
+        # to the socket directly and assert on the raw response.
+        request = (
+            "POST /api/upload?filename=large.pdf HTTP/1.1\r\n"
+            f"Host: 127.0.0.1:{self.port}\r\n"
+            "Content-Type: application/pdf\r\n"
+            f"Content-Length: {100 * 1024 * 1024 + 1}\r\n"
+            "\r\n"
+        ).encode()
+        with socket.create_connection(("127.0.0.1", self.port), timeout=10) as sock:
+            sock.sendall(request)
+            response = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+        self.assertIn(b" 413 ", response, response[:200])
 
     def test_page_contains_upload_first_interface(self) -> None:
         status, _, body = self.request("GET", "/")
