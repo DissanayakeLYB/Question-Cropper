@@ -44,6 +44,7 @@ const els = {
   overlay: document.getElementById("overlay"),
   loading: document.getElementById("loading"),
   loadingText: document.getElementById("loading-text"),
+  loadingHint: document.getElementById("loading-hint"),
   toast: document.getElementById("toast"),
 };
 
@@ -116,8 +117,12 @@ function waitForSnaps() {
   return Promise.allSettled([...snapsInFlight]);
 }
 
-function showLoading(text) {
+function showLoading(text, hint = "") {
   els.loadingText.textContent = text;
+  if (els.loadingHint) {
+    els.loadingHint.textContent = hint;
+    els.loadingHint.classList.toggle("hidden", !hint);
+  }
   els.loading.classList.remove("hidden");
 }
 
@@ -187,7 +192,10 @@ async function openPaper(paperId, expected = expectedValue()) {
 
   const previousId = active ? active.data.id : null;
   setBusy(true);
-  showLoading("Reading PDF…");
+  showLoading(
+    "Analysing the PDF and finding the questions…",
+    "Every page is read for question starts, so a long paper can take a couple of minutes."
+  );
   try {
     const data = await api(`/api/papers/${paperId}?expected=${expected}`);
     const state = makeState(data);
@@ -542,7 +550,10 @@ async function uploadFile(file) {
   }
 
   busy = true;
-  showLoading(`Uploading and cropping ${file.name}…`);
+  showLoading(
+    `Uploading and cropping ${file.name}…`,
+    "Detecting the questions, then writing one PNG for each of them."
+  );
   updateControls();
   try {
     const expected = expectedValue();
@@ -1092,7 +1103,10 @@ async function saveAll() {
   saving = true;
   const count = active.boxes.length;
   const boxes = `box${count === 1 ? "" : "es"}`;
-  showLoading(`Recropping ${count} ${boxes}…`);
+  showLoading(
+    `Recropping ${count} ${boxes}…`,
+    "Writing the PNGs from the boxes you set. A long paper takes a minute or two."
+  );
   updateControls();
   els.saveStatus.textContent = "";
   toast(`Recropping ${count} ${boxes} from your edges — this can take a minute on a long paper.`);

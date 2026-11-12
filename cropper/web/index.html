@@ -78,10 +78,6 @@
         <div id="stage">
           <img id="page-image" alt="PDF page">
           <div id="overlay"></div>
-          <div id="loading" class="loading hidden">
-            <div class="spinner"></div>
-            <span id="loading-text">Reading PDF…</span>
-          </div>
         </div>
         </div>
         <aside id="review-panel" class="review-panel hidden" aria-labelledby="review-title">
@@ -97,6 +93,13 @@
     </section>
   </main>
 
+  <div id="loading" class="loading hidden" role="status" aria-live="polite">
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <strong id="loading-text">Reading PDF…</strong>
+      <span id="loading-hint" class="loading-hint hidden"></span>
+    </div>
+  </div>
   <div id="toast" class="toast hidden" role="status"></div>
   <script src="/static/app.js"></script>
 </body>
