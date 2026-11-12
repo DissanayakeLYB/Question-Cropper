@@ -357,6 +357,13 @@ function updateControls() {
   els.uploadButton.disabled = locked;
   els.deletePaper.disabled = !active || locked;
   els.clearProject.disabled = locked;
+  // Before a paper is open the header keeps only what makes sense there:
+  // choosing a PDF, the question count and the theme. Deleting, clearing and
+  // saving appear once a paper is loaded and cropped.
+  const paperOnly = !active;
+  els.deletePaper.classList.toggle("hidden", paperOnly);
+  els.clearProject.classList.toggle("hidden", paperOnly);
+  els.saveButton.classList.toggle("hidden", paperOnly);
   els.pageSelect.disabled = !active || locked;
   els.prevPage.disabled = !active || locked || active.page <= 1;
   els.nextPage.disabled = !active || locked || active.page >= total;
