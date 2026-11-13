@@ -17,7 +17,7 @@ from .page import (
     make_thumbnail,
     ocr_lines,
     open_pdf,
-    render_page,
+    page_image,
     save_preview,
     text_lines,
 )
@@ -41,7 +41,7 @@ def analyze_pdf(
         pages: list[PageInfo] = []
         for index in range(doc.page_count):
             page = doc[index]
-            image = render_page(page, dpi)
+            image = page_image(doc, index, dpi)
             if preview_dir is not None:
                 save_preview(image, preview_dir / f"{index + 1:03d}.jpg")
             if has_text_layer(page):
@@ -77,7 +77,7 @@ def analyze_pdf(
         inks: dict[int, PageInk] = {}
         for page_number in sorted(segments_by_page):
             page = pages[page_number - 1]
-            image = render_page(doc[page_number - 1], dpi)
+            image = page_image(doc, page_number - 1, dpi)
             ink = PageInk(image)
             inks[page_number] = ink
             for segment in segments_by_page[page_number]:

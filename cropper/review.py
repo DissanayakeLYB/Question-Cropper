@@ -21,7 +21,7 @@ from . import DPI
 from .crop import save_questions
 from .edges import PageInk, snap_rows
 from .models import Box, PaperAnalysis
-from .page import CropperError, open_pdf, render_page
+from .page import CropperError, open_pdf, page_image
 from .pipeline import analyze_pdf
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -122,7 +122,7 @@ class ReviewPaper:
             dpi = self.analysis.dpi if self.analysis is not None else DPI
             doc = open_pdf(self.path)
             try:
-                cached = PageInk(render_page(doc[page_number - 1], dpi))
+                cached = PageInk(page_image(doc, page_number - 1, dpi))
             finally:
                 doc.close()
         self._inks[page_number] = cached

@@ -12,7 +12,7 @@ from . import DPI, JOIN_GAP, PADDING
 from .detect import Segment
 from .edges import PageInk, trim_to_ink
 from .models import Box, PageInfo
-from .page import open_pdf, render_page
+from .page import open_pdf, page_image
 
 
 @dataclass
@@ -95,10 +95,10 @@ def save_questions(
 
         cache: dict[int, Image.Image] = {}
 
-        def page_image(page_index: int) -> Image.Image:
+        def page_pixels(page_index: int) -> Image.Image:
             image = cache.pop(page_index, None)
             if image is None:
-                image = render_page(doc[page_index], dpi)
+                image = page_image(doc, page_index, dpi)
             cache[page_index] = image
             while len(cache) > 3:
                 oldest = next(iter(cache))
@@ -117,7 +117,7 @@ def save_questions(
         for question in sorted(grouped):
             ordered = sorted(grouped[question], key=lambda box: _reading_order(box, sizes[box.page - 1][0]))
             crops = [
-                page_image(box.page - 1).crop((box.x0, box.y0, box.x1, box.y1)) for box in ordered
+                page_pixels(box.page - 1).crop((box.x0, box.y0, box.x1, box.y1)) for box in ordered
             ]
             image = join_crops(crops)
             filename = question_filename(pdf_path.stem, question)

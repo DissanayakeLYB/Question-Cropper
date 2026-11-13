@@ -10,6 +10,8 @@ import pymupdf
 import pytesseract
 from PIL import Image
 
+from . import DPI
+from .deskew import straighten
 from .models import TextLine
 
 TEXT_LAYER_MIN_CHARS = 40
@@ -38,6 +40,23 @@ def render_page(page: pymupdf.Page, dpi: int) -> Image.Image:
     zoom = dpi / 72.0
     pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), colorspace=pymupdf.csRGB, alpha=False)
     return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+
+
+def page_image(doc: pymupdf.Document, index: int, dpi: int = DPI) -> Image.Image:
+    """Render one page and square it up.
+
+    Every caller that measures or crops a page uses this, so a photographed
+    page is straightened the same way for detection, snapping and saving.
+
+    A page with a text layer is left as it is: its lines are placed from the
+    PDF's own coordinates, which describe the un-straightened page, so warping
+    the image would leave every line pointing at the wrong place.
+    """
+    page = doc[index]
+    image = render_page(page, dpi)
+    if has_text_layer(page):
+        return image
+    return straighten(image)
 
 
 def has_text_layer(page: pymupdf.Page) -> bool:
