@@ -12,6 +12,7 @@ from PIL import Image
 
 from . import DPI
 from .deskew import straighten
+from .lighting import even_light
 from .models import TextLine
 
 TEXT_LAYER_MIN_CHARS = 40
@@ -152,6 +153,9 @@ def _ocr_pass(
         word = raw_text.strip()
         if not word:
             continue
+        if not any(character.isalnum() for character in word):
+            # Frame lines, rules and specks read as "|", "=" and the like.
+            continue
         try:
             confidence = float(data["conf"][i])
         except (KeyError, TypeError, ValueError):
@@ -195,16 +199,67 @@ def _ocr_pass(
     return lines
 
 
+# OCR reads the ink area only: the blank canvas around a page, or a photo's
+# dark desk, makes Tesseract's layout analysis drop most of each line.
+CONTENT_LEVEL = 200
+CONTENT_PADDING = 16
+
+
+def _content_box(image: Image.Image) -> tuple[int, int, int, int] | None:
+    """Where the ink on the picture is, with a little padding around it."""
+    ink = image.convert("L").point(lambda value: 255 if value < CONTENT_LEVEL else 0)
+    bounds = ink.getbbox()
+    if bounds is None:
+        return None
+    left, top, right, bottom = bounds
+    box = (
+        max(0, left - CONTENT_PADDING),
+        max(0, top - CONTENT_PADDING),
+        min(image.width, right + CONTENT_PADDING),
+        min(image.height, bottom + CONTENT_PADDING),
+    )
+    if (box[2] - box[0]) * (box[3] - box[1]) > 0.98 * image.width * image.height:
+        return None
+    return box
+
+
+def _ocr_merged(
+    image: Image.Image, psms: tuple[int, ...], min_confidence: float
+) -> list[TextLine]:
+    lines: list[TextLine] = []
+    for psm in psms:
+        lines.extend(_ocr_pass(image, psm, min_confidence))
+    return _dedupe_lines(lines)
+
+
 def ocr_lines(
     image: Image.Image,
     psms: tuple[int, ...] = OCR_PSMS,
     min_confidence: float = MIN_OCR_CONFIDENCE,
 ) -> list[TextLine]:
-    """OCR an image with Tesseract and return the merged line boxes."""
-    lines: list[TextLine] = []
-    for psm in psms:
-        lines.extend(_ocr_pass(image, psm, min_confidence))
-    return _dedupe_lines(lines)
+    """OCR an image with Tesseract and return the merged line boxes.
+
+    Only the area with ink on it is read. On a photographed page Tesseract's
+    layout analysis otherwise returns each line from the printed frame's left
+    edge onward, so the first words of every line are lost. Uneven lighting is
+    evened out first, or whole lines in a shadow are missed.
+    """
+    box = _content_box(image)
+    source = even_light(image if box is None else image.crop(box))
+    lines = _ocr_merged(source, psms, min_confidence)
+    if box is None:
+        return lines
+    left, top, _, _ = box
+    return [
+        TextLine(
+            text=line.text,
+            x0=line.x0 + left,
+            y0=line.y0 + top,
+            x1=line.x1 + left,
+            y1=line.y1 + top,
+        )
+        for line in lines
+    ]
 
 
 def _dedupe_lines(lines: list[TextLine]) -> list[TextLine]:

@@ -10,6 +10,7 @@ from cropper.deskew import find_page_quad, straighten
 from cropper.page import has_text_layer, open_pdf, page_image, render_page, text_lines
 from cropper.pipeline import analyze_pdf
 from tests.helpers import (
+    make_perspective_photo_pdf,
     make_rotated_photo_pdf,
     make_rotated_photo_pdf_with_text_layer,
     make_single_column_pdf,
@@ -103,6 +104,35 @@ class PhotoPipelineTests(unittest.TestCase):
         finally:
             temp.cleanup()
 
+
+    @unittest.skipUnless(shutil.which("tesseract"), "Tesseract is not installed")
+    def test_handheld_photo_on_a_dark_desk_is_straightened_and_read(self) -> None:
+        """Perspective, uneven light, a shadow and a dark desk, as a phone sees it."""
+        temp = tempfile.TemporaryDirectory()
+        try:
+            pdf = Path(temp.name) / "desk.pdf"
+            make_perspective_photo_pdf(pdf)
+
+            doc = open_pdf(pdf)
+            try:
+                raw = render_page(doc[0], 200)
+                # The paper is crooked and off-square, so there is work to do.
+                self.assertIsNotNone(find_page_quad(raw))
+                straight = page_image(doc, 0, 200)
+            finally:
+                doc.close()
+
+            self.assertEqual(straight.size, raw.size)
+            rows = [int(straight.height * frac) for frac in (0.2, 0.5, 0.8)]
+            edges = [first_dark_column(straight, y) for y in rows]
+            self.assertNotIn(None, edges)
+            self.assertLessEqual(max(edges) - min(edges), 8)
+
+            analysis = analyze_pdf(pdf, expected_count=2)
+            questions = sorted({box.question for box in analysis.boxes})
+            self.assertEqual(questions, [1, 2])
+        finally:
+            temp.cleanup()
 
     @unittest.skipUnless(shutil.which("tesseract"), "Tesseract is not installed")
     def test_page_with_a_text_layer_is_not_straightened(self) -> None:

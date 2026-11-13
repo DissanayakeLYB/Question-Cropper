@@ -18,6 +18,7 @@ from PIL import Image
 
 from . import PADDING
 from .detect import Segment
+from .lighting import even_light
 from .models import Box, PageInfo
 from .page import ink_threshold
 
@@ -85,7 +86,9 @@ class PageInk:
     """Dark-pixel profile of one rendered page."""
 
     def __init__(self, image: Image.Image, threshold: int | None = None) -> None:
-        gray = image.convert("L")
+        # A shadowed half of a photo reads as ink: even the light out first, so
+        # the profile follows the text and not the lamp.
+        gray = even_light(image).convert("L")
         self.width, self.height = gray.size
         self.threshold = ink_threshold(gray) if threshold is None else threshold
         self.mask = gray.point(lambda value: 255 if value < self.threshold else 0)

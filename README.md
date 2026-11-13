@@ -41,7 +41,7 @@ Red boxes need a look and are listed under **Needs review**; good boxes are blue
 
 `output/<pdf name>/` gets `2019_q01.png`, `2019_q02.png`, … plus `manifest.json` with the boxes and review warnings. Boxes sharing a question number are joined, so a question spanning two pages becomes one PNG.
 
-Photos of a paper are squared up first: the page's thick black border is found and the page is straightened before anything is detected, so a tilted or skewed photo still crops along the page. Detection is heuristic: check each new paper, especially unusual layouts, poor scans, missing question numbers and figures that cross columns.
+Photos of a paper are squared up first: the page's thick black border is found and the page is straightened before anything is detected, so a tilted or skewed photo still crops along the page. A page shot on a dark desk is found from the paper itself, and a lamp's falloff or a shadow is evened out before the text is read. Detection is heuristic: check each new paper, especially unusual layouts, poor scans, missing question numbers and figures that cross columns.
 
 ## Tests
 

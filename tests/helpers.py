@@ -6,7 +6,9 @@ from io import BytesIO
 from pathlib import Path
 
 import pymupdf
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
+
+from cropper.deskew import _perspective_coeffs
 
 PAGE_WIDTH = 595
 PAGE_HEIGHT = 842
@@ -229,6 +231,87 @@ def make_rotated_photo_pdf_with_text_layer(path: Path, angle: float = 6.0) -> No
         doc.saveIncr()
     finally:
         doc.close()
+
+
+DESK = (30, 32, 36)
+
+
+def make_perspective_photo_pdf(path: Path) -> None:
+    """A realistic phone photo: dark desk, perspective, uneven light, shadow."""
+    source = pymupdf.open()
+    source.new_page(width=PAGE_WIDTH, height=PAGE_HEIGHT)
+    page = source[0]
+    _add_header_footer(page, 1, 1)
+    _add_question(
+        page,
+        MARGIN,
+        95,
+        1,
+        "A ball is thrown vertically upwards with a speed of 20 m/s. "
+        "Sketch the velocity-time graph and calculate the maximum height reached.",
+    )
+    _add_question(
+        page,
+        MARGIN,
+        520,
+        2,
+        "A block of mass 2 kg rests on a rough horizontal surface. "
+        "A horizontal force of 8 N is applied to the block.",
+    )
+    pix = page.get_pixmap(matrix=pymupdf.Matrix(200 / 72, 200 / 72))
+    image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    source.close()
+
+    margin = 70
+    framed = Image.new("RGB", (image.width + 2 * margin, image.height + 2 * margin), "white")
+    framed.paste(image, (margin, margin))
+    draw = ImageDraw.Draw(framed)
+    draw.rectangle([45, 45, framed.width - 46, framed.height - 46], outline=(0, 0, 0), width=18)
+
+    width, height = framed.size
+    canvas = (width + 400, height + 300)
+    # The printed frame, and where it lands in a hand-held shot: the far edge is
+    # visibly shorter and the page leans, so the paper is not a rectangle.
+    source_quad = ((45, 45), (width - 46, 45), (width - 46, height - 46), (45, height - 46))
+    target_quad = (
+        (360, 150),
+        (width - 40, 90),
+        (width - 140, height + 150),
+        (60, height + 220),
+    )
+    photo = framed.transform(
+        canvas,
+        Image.Transform.PERSPECTIVE,
+        _perspective_coeffs(target_quad, source_quad),
+        resample=Image.Resampling.BICUBIC,
+        fillcolor=DESK,
+    )
+
+    # Uneven light: bright at the top left, falling off to the right, with a
+    # soft shadow across the lower part of the page.
+    falloff = Image.linear_gradient("L").rotate(90, expand=True).resize(photo.size)
+    falloff = falloff.point(lambda value: 140 + value * 115 // 255)
+    shadow = Image.new("L", photo.size, 255)
+    shadow_draw = ImageDraw.Draw(shadow)
+    shadow_draw.ellipse(
+        [-photo.width * 0.2, photo.height * 0.55, photo.width * 1.1, photo.height * 1.25],
+        fill=170,
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(90))
+    light = ImageChops.multiply(falloff, shadow)
+    photo = ImageChops.multiply(photo, Image.merge("RGB", (light, light, light)))
+    photo = photo.filter(ImageFilter.GaussianBlur(0.6))
+
+    buffer = BytesIO()
+    photo.save(buffer, format="PNG")
+    output = pymupdf.open()
+    try:
+        output.new_page(width=photo.width * 72 / 200, height=photo.height * 72 / 200)
+        target = output[0]
+        target.insert_image(target.rect, stream=buffer.getvalue())
+        output.save(path)
+    finally:
+        output.close()
 
 
 def make_scanned_pdf(text_pdf: Path, scanned_pdf: Path) -> None:

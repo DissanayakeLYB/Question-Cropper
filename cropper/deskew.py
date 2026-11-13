@@ -36,6 +36,13 @@ MAX_SKEW = 20.0
 STRAIGHT_TOLERANCE = 0.5
 # A page frame encloses most of the picture.
 MIN_PAGE_FRACTION = 0.45
+# A photo shot on a desk has a dark surround; the page is then found from the
+# bright paper, because the printed frame and the desk are both dark.
+DARK_SURROUND = 0.5
+# Brightness used to split paper from desk, kept inside a sane band.
+PAPER_LEVEL = (45, 200)
+# A paper that fills less of the picture than this is not a page.
+MIN_PAPER_FRACTION = 0.15
 
 Quad = tuple[tuple[float, float], tuple[float, float], tuple[float, float], tuple[float, float]]
 
@@ -211,18 +218,79 @@ def _plausible(corners: Quad, width: int, height: int) -> bool:
     return _area(corners) >= MIN_PAGE_FRACTION * width * height
 
 
-def find_page_quad(image: Image.Image) -> Quad | None:
-    """The four corners of the page frame, clockwise from the top left.
+def _surround_is_dark(gray: Image.Image) -> bool:
+    """True when the picture sits on a dark desk rather than on white paper."""
+    width, height = gray.size
+    data = gray.tobytes()
+    step_x = max(1, width // 50)
+    step_y = max(1, height // 50)
+    samples = [data[x] for x in range(0, width, step_x)]
+    samples += [data[(height - 1) * width + x] for x in range(0, width, step_x)]
+    samples += [data[y * width] for y in range(0, height, step_y)]
+    samples += [data[y * width + width - 1] for y in range(0, height, step_y)]
+    if not samples:
+        return False
+    return sum(1 for value in samples if value < DARK_LEVEL) / len(samples) > DARK_SURROUND
 
-    Returns ``None`` when the picture has no usable frame or the page is already
-    square to the image, in which case it must be left as it is.
-    """
-    if image.width < 80 or image.height < 80:
+
+def _otsu_level(histogram: list[int]) -> int:
+    """The brightness that best splits the picture into two groups."""
+    total = sum(histogram)
+    if total <= 0:
+        return 128
+    weighted = sum(value * count for value, count in enumerate(histogram))
+    weight_back = 0
+    sum_back = 0
+    best = -1.0
+    level = 128
+    for value, count in enumerate(histogram):
+        weight_back += count
+        if weight_back == 0:
+            continue
+        weight_fore = total - weight_back
+        if weight_fore == 0:
+            break
+        sum_back += value * count
+        mean_back = sum_back / weight_back
+        mean_fore = (weighted - sum_back) / weight_fore
+        between = weight_back * weight_fore * (mean_back - mean_fore) ** 2
+        if between > best:
+            best = between
+            level = value
+    return level
+
+
+def _paper_mask(gray: Image.Image) -> Image.Image | None:
+    """The bright paper, on a photo where the desk around it is dark."""
+    level = _otsu_level(gray.histogram())
+    level = max(PAPER_LEVEL[0], min(PAPER_LEVEL[1], level))
+    mask = gray.point(lambda value: 255 if value > level else 0)
+    bright = mask.histogram()[255]
+    if bright < MIN_PAPER_FRACTION * gray.width * gray.height:
         return None
-    small = _downscale(image)
-    mask = _dark_mask(small)
+    return mask
+
+
+def _quad_skew(quad: Quad) -> float:
+    """The largest deviation from square, in degrees, over the four edges."""
+    worst = 0.0
+    for index in range(4):
+        x0, y0 = quad[index]
+        x1, y1 = quad[(index + 1) % 4]
+        dx = x1 - x0
+        dy = y1 - y0
+        if abs(dx) >= abs(dy):
+            angle = math.degrees(math.atan2(dy, abs(dx)))
+        else:
+            angle = math.degrees(math.atan2(dx, abs(dy)))
+        worst = max(worst, abs(angle))
+    return worst
+
+
+def _quad_from_mask(mask: Image.Image) -> Quad | None:
+    """Fit the four outer edges of a mask and intersect them into corners."""
     edges = _scan_edges(mask)
-    width, height = small.size
+    width, height = mask.size
     needed = {
         "left": height * MIN_EDGE_POINTS,
         "right": height * MIN_EDGE_POINTS,
@@ -271,16 +339,39 @@ def find_page_quad(image: Image.Image) -> Quad | None:
     quad: Quad = corners  # type: ignore[assignment]
     if not _plausible(quad, width, height):
         return None
+    return quad
 
-    skew = max(
-        abs(math.degrees(math.atan(fits[name][0]))) for name in ("left", "right", "top", "bottom")
-    )
-    if skew < STRAIGHT_TOLERANCE:
-        # Already square: warping would resample the page for nothing.
+
+def find_page_quad(image: Image.Image) -> Quad | None:
+    """The four corners of the page, clockwise from the top left.
+
+    Returns ``None`` when the picture has no usable page or the page is already
+    square to the image, in which case it must be left as it is.
+    """
+    if image.width < 80 or image.height < 80:
+        return None
+    small = _downscale(image)
+    gray = small.convert("L")
+
+    quad = None
+    if _surround_is_dark(gray):
+        # The desk and the printed frame are both dark, so the frame's outer
+        # edge cannot be told from the background: measure the bright paper.
+        paper = _paper_mask(gray)
+        if paper is not None:
+            quad = _quad_from_mask(paper)
+    else:
+        quad = _quad_from_mask(_dark_mask(gray))
+    if quad is None:
         return None
 
-    scale_x = image.width / width
-    scale_y = image.height / height
+    skew = _quad_skew(quad)
+    if skew > MAX_SKEW or skew < STRAIGHT_TOLERANCE:
+        # Too crooked to be a page, or already square: no warp either way.
+        return None
+
+    scale_x = image.width / small.width
+    scale_y = image.height / small.height
     return tuple((x * scale_x, y * scale_y) for x, y in quad)  # type: ignore[return-value]
 
 
