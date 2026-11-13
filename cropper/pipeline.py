@@ -7,14 +7,22 @@ from pathlib import Path
 
 from . import DPI, PADDING
 from .crop import trim_segment
-from .detect import build_segments, detect_columns, detect_margins, find_question_starts
+from .detect import (
+    QUESTION_RE,
+    build_segments,
+    detect_columns,
+    detect_margins,
+    find_question_starts,
+)
 from .edges import PageInk, resolve_overlaps
+from .lighting import light_is_uneven
 from .models import Box, PageInfo, PaperAnalysis
 from .repair import rescue_missing_starts
 from .selfcheck import review_flags, split_swallowed_questions
 from .page import (
     has_text_layer,
     make_thumbnail,
+    ocr_ink_lines,
     ocr_lines,
     open_pdf,
     page_image,
@@ -48,6 +56,13 @@ def analyze_pdf(
                 lines = text_lines(page, image.width, image.height)
             else:
                 lines = ocr_lines(image)
+                if light_is_uneven(image) or not any(
+                    QUESTION_RE.match(line.text) for line in lines
+                ):
+                    # Nothing numbered was read, or the light falls across the
+                    # page: its border or the shadow is hiding the text, so read
+                    # the ink area instead of the whole picture.
+                    lines = ocr_ink_lines(image)
             thumb, scale = make_thumbnail(image)
             pages.append(
                 PageInfo(
